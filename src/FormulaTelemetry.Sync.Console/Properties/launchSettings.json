@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "FormulaTelemetry.Sync.Console": {
+      "commandName": "Project",
+      "commandLineArgs": "--year 2026 --round 3"
+    }
+  }
+}
