@@ -12,6 +12,8 @@ International F1 post-session telemetry platform (OpenF1 → PostgreSQL → Web 
 
 Database: local PostgreSQL `formulatelemetry` — see [docs/database.md](docs/database.md).
 
+Architecture diagrams (system, components, DB ER): [docs/architecture.md](docs/architecture.md).
+
 ## Sync.Console
 
 ```powershell

@@ -30,6 +30,8 @@ Schema maps 1:1 to [OpenF1 API](https://openf1.org/docs/) endpoints. Historical 
 
 DDL: [`sql/001_openf1_schema.sql`](../sql/001_openf1_schema.sql)
 
+ER and system diagrams: [architecture.md](architecture.md).
+
 ## What Sync downloads per session
 
 When you run `--latest`, `--session`, `--year`, or `--pending`, Sync.Core loads the **full session pack** into PostgreSQL:
