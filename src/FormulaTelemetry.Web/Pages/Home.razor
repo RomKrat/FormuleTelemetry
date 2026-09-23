@@ -1,0 +1,22 @@
+﻿@page "/"
+@inject SeasonState Season
+@inject NavigationManager Nav
+
+<PageTitle>FT Telemetry</PageTitle>
+<p class="text-muted"><em>Loading season…</em></p>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await Season.EnsureInitializedAsync();
+        var target = Season.LastCompleted ?? Season.Meetings.FirstOrDefault();
+        if (target is not null)
+        {
+            Nav.NavigateTo($"meeting/{target.MeetingKey}", replace: true);
+        }
+        else
+        {
+            Nav.NavigateTo("calendar", replace: true);
+        }
+    }
+}

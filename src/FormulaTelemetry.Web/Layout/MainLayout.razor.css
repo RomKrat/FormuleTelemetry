@@ -1,0 +1,143 @@
+.page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+main {
+    flex: 1;
+    background: var(--bg);
+}
+
+.sidebar {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+}
+
+.top-row {
+    background-color: var(--surface);
+    border-bottom: 1px solid var(--border);
+    justify-content: flex-start;
+    gap: 1rem;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+}
+
+.brand-mark {
+    margin-right: auto;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+}
+
+.top-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-left: auto;
+}
+
+.season-label {
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0;
+}
+
+.meeting-select {
+    appearance: none;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 1.75rem 0.35rem 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23A1A1AA' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    min-width: 11rem;
+    max-width: min(18rem, 42vw);
+}
+.meeting-select:hover,
+.meeting-select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+.meeting-select:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.season-select {
+    appearance: none;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 1.75rem 0.35rem 0.65rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23A1A1AA' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    min-width: 5.5rem;
+}
+.season-select:hover,
+.season-select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+.season-select:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.top-row ::deep a, .top-row ::deep .btn-link {
+    white-space: nowrap;
+    text-decoration: none;
+    color: var(--muted);
+}
+
+.top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
+    color: var(--cyan);
+    text-decoration: none;
+}
+
+@media (max-width: 640.98px) {
+    .top-row {
+        justify-content: space-between;
+    }
+}
+
+@media (min-width: 641px) {
+    .page {
+        flex-direction: row;
+    }
+
+    .sidebar {
+        width: 200px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+    }
+
+    .top-row {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .top-row, article {
+        padding-left: 2rem !important;
+        padding-right: 1.5rem !important;
+    }
+}

@@ -1,0 +1,22 @@
+@FormulaTelemetry.Api_HostAddress = http://localhost:5208
+
+### Health
+GET {{FormulaTelemetry.Api_HostAddress}}/api/health
+
+### Meetings 2026
+GET {{FormulaTelemetry.Api_HostAddress}}/api/meetings?year=2026
+
+### Meeting detail
+GET {{FormulaTelemetry.Api_HostAddress}}/api/meetings/1294
+
+### Sessions of a meeting
+GET {{FormulaTelemetry.Api_HostAddress}}/api/meetings/1294/sessions
+
+### Session detail
+GET {{FormulaTelemetry.Api_HostAddress}}/api/sessions/9158
+
+### Session results
+GET {{FormulaTelemetry.Api_HostAddress}}/api/sessions/9158/results
+
+### Session laps
+GET {{FormulaTelemetry.Api_HostAddress}}/api/sessions/9158/laps

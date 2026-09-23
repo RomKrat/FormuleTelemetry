@@ -1,0 +1,174 @@
+﻿@inherits LayoutComponentBase
+@inject IJSRuntime Js
+@inject SeasonState Season
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <span class="brand-mark d-none d-md-inline">FT Telemetry</span>
+            <div class="top-actions">
+                <label class="season-label" for="meeting-select">Grand Prix</label>
+                <select id="meeting-select"
+                        class="meeting-select"
+                        @bind="SelectedMeetingKeyBind"
+                        @bind:event="onchange"
+                        disabled="@(Season.IsLoading || Season.Meetings.Count == 0)">
+                    @if (Season.Meetings.Count == 0)
+                    {
+                        <option value="0">No races</option>
+                    }
+                    else
+                    {
+                        var round = 0;
+                        @foreach (var m in Season.Meetings)
+                        {
+                            round++;
+                            <option value="@m.MeetingKey">@MeetingCalendar.DropdownLabel(m, round)</option>
+                        }
+                    }
+                </select>
+
+                <label class="season-label" for="season-select">Season</label>
+                <select id="season-select"
+                        class="season-select"
+                        value="@Season.Year"
+                        disabled="@(Season.IsLoading || Season.AvailableYears.Count == 0)"
+                        @onchange="OnSeasonChangedAsync">
+                    @foreach (var y in Season.AvailableYears)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+
+                <button type="button" class="btn-outline-theme" @onclick="ToggleThemeAsync" title="Toggle light / dark">
+                    @_themeLabel
+                </button>
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    private string _theme = "dark";
+    private string _themeLabel => _theme == "dark" ? "Light mode" : "Dark mode";
+
+    private int SelectedMeetingKey =>
+        Season.SelectedMeetingKey
+        ?? Season.LastCompleted?.MeetingKey
+        ?? Season.Meetings.FirstOrDefault()?.MeetingKey
+        ?? 0;
+
+    /// <summary>Two-way bind for GP select — setter drives client-side navigation.</summary>
+    private int SelectedMeetingKeyBind
+    {
+        get => SelectedMeetingKey;
+        set
+        {
+            if (value <= 0 || value == SelectedMeetingKey) return;
+            var target = $"meeting/{value}";
+            var current = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
+            if (!string.Equals(current, target, StringComparison.OrdinalIgnoreCase))
+            {
+                Nav.NavigateTo(target);
+            }
+            else
+            {
+                Season.SelectMeeting(value);
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Season.Changed += OnSeasonChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        await Season.EnsureInitializedAsync();
+        SyncMeetingFromUri();
+    }
+
+    private void OnSeasonChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        SyncMeetingFromUri();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SyncMeetingFromUri()
+    {
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
+        if (path.StartsWith("meeting/", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = path["meeting/".Length..];
+            var slash = rest.IndexOf('/');
+            var keyPart = slash >= 0 ? rest[..slash] : rest;
+            if (int.TryParse(keyPart, out var meetingKey))
+            {
+                Season.SelectMeeting(meetingKey);
+            }
+
+            return;
+        }
+
+        // Legacy /session/{id} redirects to meeting/.../session/...
+        if (path.StartsWith("session/", StringComparison.OrdinalIgnoreCase)
+            && Season.SelectedMeetingKey is not null)
+        {
+            return;
+        }
+    }
+
+    private async Task OnSeasonChangedAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var year)) return;
+        await Season.SetYearAsync(year);
+
+        var last = Season.LastCompleted ?? Season.Meetings.FirstOrDefault();
+        if (last is not null)
+        {
+            Season.SelectMeeting(last.MeetingKey);
+            Nav.NavigateTo($"meeting/{last.MeetingKey}");
+        }
+        else
+        {
+            Season.SelectMeeting(null);
+            Nav.NavigateTo("calendar");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _theme = await Js.InvokeAsync<string>("ftTheme.applySaved");
+            StateHasChanged();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        _theme = await Js.InvokeAsync<string>("ftTheme.toggle");
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        Season.Changed -= OnSeasonChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

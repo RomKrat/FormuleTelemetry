@@ -1,0 +1,81 @@
+.navbar-toggler {
+    background-color: color-mix(in srgb, var(--text) 8%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+}
+
+.navbar-toggler-icon {
+    display: block;
+    width: 1.1rem;
+    height: 2px;
+    background: var(--text);
+    box-shadow: 0 5px 0 var(--text), 0 -5px 0 var(--text);
+}
+
+.top-row {
+    min-height: 3.5rem;
+    background-color: transparent;
+    border-bottom: 1px solid var(--border);
+}
+
+.navbar-brand {
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text) !important;
+    text-decoration: none;
+}
+
+.nav-item {
+    font-size: 0.9rem;
+    padding-bottom: 0.25rem;
+}
+
+.nav-item:first-of-type {
+    padding-top: 1rem;
+}
+
+.nav-item:last-of-type {
+    padding-bottom: 1rem;
+}
+
+.nav-item ::deep a {
+    color: var(--muted);
+    border-radius: 0.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
+    line-height: 1.2;
+    border: 1px solid transparent;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.nav-item ::deep a.active {
+    background-color: color-mix(in srgb, var(--cyan) 12%, transparent);
+    border-color: color-mix(in srgb, var(--cyan) 30%, var(--border));
+    color: var(--text);
+}
+
+.nav-item ::deep a:hover {
+    background-color: var(--surface-2);
+    color: var(--text);
+}
+
+@media (min-width: 641px) {
+    .navbar-toggler {
+        display: none;
+    }
+
+    .collapse {
+        display: block;
+    }
+
+    .nav-scrollable {
+        height: calc(100vh - 3.5rem);
+        overflow-y: auto;
+    }
+}

@@ -1,6 +1,8 @@
 # FormulaTelemetry — schémata
 
-Dokumentace architektury a struktury. Stav kódu: Sync (Core / Console / Worker) + PostgreSQL. Web API, Blazor a MAUI ještě nejsou.
+Dokumentace architektury a struktury. Stav kódu: Sync (Core / Console / Worker) + PostgreSQL + Web API + **Blazor WASM**. MAUI ještě není.
+
+UI / UX návrh klientů (brand, light/dark, obrazovky): [ui-design.md](ui-design.md).
 
 ## Grafické diagramy
 
@@ -71,11 +73,11 @@ flowchart LR
     D3[Sync_Console]
     D4[Sync_Worker]
     D5[Email_SMTP]
+    D6[Web_API]
+    D7[Blazor_WASM]
   end
 
   subgraph planned [Plan]
-    P1[Web_API]
-    P2[Blazor_WASM]
     P3[MAUI]
     P4[car_data_locations]
   end

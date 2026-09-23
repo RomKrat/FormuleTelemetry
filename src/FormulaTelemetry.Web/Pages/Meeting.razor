@@ -1,0 +1,149 @@
+@page "/meeting/{MeetingKey:int}"
+@page "/meeting/{MeetingKey:int}/session/{SessionKey:int}"
+@inject TelemetryApiClient Api
+@inject SeasonState Season
+@inject NavigationManager Nav
+
+<PageTitle>@(_meeting?.MeetingName ?? "Meeting") — FT Telemetry</PageTitle>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading…</em></p>
+}
+else if (_meeting is null)
+{
+    <p>Meeting not found.</p>
+    <a href="calendar">← Season</a>
+}
+else
+{
+    <nav class="breadcrumb-nav">
+        <a href="calendar">Season @_year</a>
+        <span>/</span>
+        <span>@_meeting.MeetingName</span>
+        @if (_activeSession is not null)
+        {
+            <span>/</span>
+            <span>@_activeSession.SessionName</span>
+        }
+    </nav>
+
+    <p class="page-kicker">Race weekend</p>
+    <h1>@_meeting.MeetingName</h1>
+    <p class="text-muted mb-3">
+        @(_meeting.Location ?? _meeting.CircuitShortName ?? "—")
+        · @(_meeting.CountryName ?? "—")
+        · @UiFormat.FormatMeetingDateRange(_meeting.DateStart, _meeting.DateEnd)
+    </p>
+
+    @if (_sessions is { Count: > 0 })
+    {
+        <div class="session-tabs" role="tablist" aria-label="Sessions">
+            @foreach (var s in _sessions)
+            {
+                var active = s.SessionKey == ActiveSessionKey;
+                <button type="button"
+                        role="tab"
+                        class="session-tab @(active ? "active" : null)"
+                        aria-selected="@active"
+                        @onclick="() => SelectSession(s.SessionKey)">
+                    @UiFormat.SessionTabLabel(s.SessionName, s.SessionType)
+                </button>
+            }
+        </div>
+
+        @if (ActiveSessionKey is int sk)
+        {
+            <SessionWorkspace @key="sk" SessionKey="sk" />
+        }
+    }
+    else
+    {
+        <div class="ft-card"><p class="mb-0 text-muted">No sessions in database for this meeting yet.</p></div>
+    }
+}
+
+@code {
+    [Parameter] public int MeetingKey { get; set; }
+    [Parameter] public int? SessionKey { get; set; }
+
+    private MeetingDto? _meeting;
+    private List<SessionDto>? _sessions;
+    private bool _loading = true;
+    private string? _error;
+    private int _year;
+    private int _loadedMeeting = -1;
+
+    private int? ActiveSessionKey =>
+        SessionKey is int sk && _sessions?.Any(s => s.SessionKey == sk) == true
+            ? sk
+            : PickDefaultSessionKey(_sessions);
+
+    private SessionDto? _activeSession =>
+        _sessions?.FirstOrDefault(s => s.SessionKey == ActiveSessionKey);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedMeeting != MeetingKey || _meeting is null)
+        {
+            _loading = true;
+            _error = null;
+            try
+            {
+                _meeting = await Api.GetMeetingAsync(MeetingKey);
+                _sessions = _meeting is null ? null : await Api.GetSessionsAsync(MeetingKey);
+                _year = _meeting?.Year ?? DateTime.UtcNow.Year;
+                Season.SelectMeeting(MeetingKey);
+                _loadedMeeting = MeetingKey;
+            }
+            catch (Exception ex)
+            {
+                _error = $"API error: {ex.Message}";
+                _loadedMeeting = -1;
+            }
+            finally
+            {
+                _loading = false;
+            }
+        }
+
+        if (_sessions is not { Count: > 0 }) return;
+
+        var desired = ActiveSessionKey;
+        if (desired is int key && SessionKey != key)
+        {
+            Nav.NavigateTo($"meeting/{MeetingKey}/session/{key}", replace: SessionKey is null);
+        }
+    }
+
+    private void SelectSession(int sessionKey)
+    {
+        if (sessionKey == SessionKey) return;
+        Nav.NavigateTo($"meeting/{MeetingKey}/session/{sessionKey}");
+    }
+
+    private static int? PickDefaultSessionKey(IReadOnlyList<SessionDto>? sessions)
+    {
+        if (sessions is null || sessions.Count == 0) return null;
+        return sessions.FirstOrDefault(IsRace)?.SessionKey
+               ?? sessions.FirstOrDefault(IsQualifying)?.SessionKey
+               ?? sessions[^1].SessionKey;
+    }
+
+    private static bool IsRace(SessionDto s)
+    {
+        var n = (s.SessionName ?? "").ToLowerInvariant();
+        var t = (s.SessionType ?? "").ToLowerInvariant();
+        return (n.Contains("race") && !n.Contains("sprint")) || t == "race";
+    }
+
+    private static bool IsQualifying(SessionDto s)
+    {
+        var n = (s.SessionName ?? "").ToLowerInvariant();
+        return n.Contains("qualifying") && !n.Contains("sprint");
+    }
+}

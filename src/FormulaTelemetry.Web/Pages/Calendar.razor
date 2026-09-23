@@ -1,0 +1,72 @@
+@page "/calendar"
+@inject SeasonState Season
+@implements IDisposable
+
+<PageTitle>Season @Season.Year — FT Telemetry</PageTitle>
+
+<p class="page-kicker">Calendar</p>
+<h1>Season @Season.Year</h1>
+<p class="text-muted">Grand Prix weekends — pick a race or use the sidebar.</p>
+
+@if (!string.IsNullOrEmpty(Season.Error))
+{
+    <div class="alert alert-danger">@Season.Error</div>
+}
+
+@if (Season.IsLoading && Season.Meetings.Count == 0)
+{
+    <p class="text-muted"><em>Loading…</em></p>
+}
+else if (Season.Meetings.Count > 0)
+{
+    <div class="meeting-grid">
+        @{
+            var i = 0;
+            var last = Season.LastCompleted;
+            var next = Season.NextUpcoming;
+        }
+        @foreach (var m in Season.Meetings)
+        {
+            i++;
+            var status = MeetingCalendar.Status(m, next);
+            var flag = CountryFlags.FlagUrl(m.CountryName, 40);
+            var cardClass = "ft-card ft-card-link meeting-card";
+            if (last is not null && m.MeetingKey == last.MeetingKey) cardClass += " is-last";
+            if (next is not null && m.MeetingKey == next.MeetingKey) cardClass += " is-next";
+            <a class="@cardClass" href="meeting/@m.MeetingKey">
+                <span class="meeting-track" aria-hidden="true"></span>
+                @if (flag is not null)
+                {
+                    <img class="meeting-flag" src="@flag" alt="" width="28" height="21" loading="lazy" />
+                }
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <span class="meeting-round">Round @i</span>
+                    <span class="ft-badge @status.Css">@status.Label</span>
+                </div>
+                <div class="meeting-name">@m.MeetingName</div>
+                <div class="meeting-meta">
+                    @(m.CountryName ?? "—")
+                    @if (!string.IsNullOrEmpty(m.CircuitShortName))
+                    {
+                        <span>· @m.CircuitShortName</span>
+                    }
+                </div>
+                <div class="meeting-date mono">
+                    @UiFormat.FormatMeetingDateRange(m.DateStart, m.DateEnd)
+                </div>
+            </a>
+        }
+    </div>
+}
+else
+{
+    <div class="ft-card"><p class="mb-0 text-muted">No meetings for @Season.Year.</p></div>
+}
+
+@code {
+    protected override void OnInitialized() => Season.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Season.Changed -= OnChanged;
+}

@@ -1,0 +1,28 @@
+@page "/session/{SessionKey:int}"
+@inject TelemetryApiClient Api
+@inject NavigationManager Nav
+
+<p class="text-muted"><em>Opening session…</em></p>
+
+@code {
+    [Parameter] public int SessionKey { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var session = await Api.GetSessionAsync(SessionKey);
+            if (session is not null)
+            {
+                Nav.NavigateTo($"meeting/{session.MeetingKey}/session/{SessionKey}", replace: true);
+                return;
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
+        Nav.NavigateTo("calendar", replace: true);
+    }
+}

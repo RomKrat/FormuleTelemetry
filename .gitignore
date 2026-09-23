@@ -404,6 +404,9 @@ FodyWeavers.xsd
 *.sln.iml
 .idea/
 
+# Unused Blazor template vendor bundles (app uses custom CSS)
+src/FormulaTelemetry.Web/wwwroot/lib/
+
 ##
 ## Visual studio for Mac
 ##

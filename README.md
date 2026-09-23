@@ -9,10 +9,54 @@ International F1 post-session telemetry platform (OpenF1 → PostgreSQL → Web 
 | `FormulaTelemetry.Sync.Core` | Class library | Shared OpenF1 download + PostgreSQL upsert |
 | `FormulaTelemetry.Sync.Console` | Console | One-shot sync |
 | `FormulaTelemetry.Sync.Worker` | Worker Service | Auto-discovers ended sessions and syncs them periodically |
+| `FormulaTelemetry.Api` | ASP.NET Core Web API | Read-only middle tier for Blazor / MAUI (IIS later) |
+| `FormulaTelemetry.Web` | Blazor WebAssembly | Browser UI (calls Web API only) |
 
 Database: local PostgreSQL `formulatelemetry` — see [docs/database.md](docs/database.md).
 
 Architecture diagrams (system, components, DB ER): [docs/architecture.md](docs/architecture.md).
+
+UI design (web + mobile, brand, themes, screens): [docs/ui-design.md](docs/ui-design.md).
+
+## Web (Blazor WASM)
+
+Needs **API running** at the same time (CORS + `ApiBaseUrl`).
+
+```powershell
+# Terminal 1
+dotnet run --project src/FormulaTelemetry.Api --launch-profile https
+
+# Terminal 2
+dotnet run --project src/FormulaTelemetry.Web --launch-profile https
+```
+
+Or in Visual Studio: right-click solution → **Configure Startup Projects** → multiple projects → start **Api** and **Web**.
+
+- Web: `https://localhost:7236`
+- API: `https://localhost:7245` (configure in `src/FormulaTelemetry.Web/wwwroot/appsettings.json` → `ApiBaseUrl`)
+
+Pages: Season (meetings) → Meeting (sessions) → Session (results / laps).
+
+## Web API
+
+```powershell
+cd C:\Roman\FormuleTelemetry
+dotnet run --project src/FormulaTelemetry.Api
+```
+
+Swagger UI: `http://localhost:5208/swagger`
+
+| Method | Route | Meaning |
+|--------|-------|---------|
+| GET | `/api/health` | API + DB ping |
+| GET | `/api/meetings?year={yyyy}` | Meetings in a season |
+| GET | `/api/meetings/{meetingKey}` | Meeting detail |
+| GET | `/api/meetings/{meetingKey}/sessions` | Sessions of a weekend |
+| GET | `/api/sessions/{sessionKey}` | Session detail |
+| GET | `/api/sessions/{sessionKey}/results` | Session results (+ driver/team names) |
+| GET | `/api/sessions/{sessionKey}/laps` | Laps for a session |
+
+Connection string: `src/FormulaTelemetry.Api/appsettings.json` → `Database:ConnectionString`. Does **not** sync OpenF1 — only reads PostgreSQL.
 
 ## Sync.Console
 

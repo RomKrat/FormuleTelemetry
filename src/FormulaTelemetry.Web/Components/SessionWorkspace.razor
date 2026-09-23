@@ -1,0 +1,404 @@
+@inject TelemetryApiClient Api
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading session…</em></p>
+}
+else if (_session is null)
+{
+    <div class="ft-card"><p class="mb-0 text-muted">Session not found.</p></div>
+}
+else
+{
+    <p class="text-muted mb-3 session-meta">
+        @_session.SessionName
+        · @(_session.DateStart?.ToString("yyyy-MM-dd HH:mm") ?? "—") UTC
+    </p>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_tab == "results" ? "active" : null)" @onclick='() => _tab = "results"'>Results</button>
+        </li>
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_tab == "laps" ? "active" : null)" @onclick="ShowLapsAsync">Laps</button>
+        </li>
+    </ul>
+
+    @if (_tab == "results")
+    {
+        @if (_results is { Count: > 0 })
+        {
+            var segmented = ResultDisplay.IsSegmentedResults(_results);
+            var segments = segmented ? ResultDisplay.MaxSegmentCount(_results) : 0;
+            var pole = _results.FirstOrDefault(x => x.Position == 1);
+            var rows = SortedResults(segmented, segments, pole).ToList();
+            <div class="ft-card results-wrap">
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th class="@_resultsSort.HeaderClass("pos")" data-col="pos" @onclick='() => SortResults("pos")'>Pos</th>
+                            <th class="@_resultsSort.HeaderClass("no")" data-col="no" @onclick='() => SortResults("no")'>No</th>
+                            <th class="@_resultsSort.HeaderClass("driver")" data-col="driver" @onclick='() => SortResults("driver")'>Driver</th>
+                            @if (segmented)
+                            {
+                                @foreach (var s in Enumerable.Range(0, segments))
+                                {
+                                    var col = $"q{s}";
+                                    <th class="@_resultsSort.HeaderClass(col)" data-col="@col" @onclick="() => SortResults(col)">
+                                        @ResultDisplay.SegmentHeader(s, segments, _session.SessionName)
+                                    </th>
+                                }
+                            }
+                            else
+                            {
+                                <th class="@_resultsSort.HeaderClass("time")" data-col="time" @onclick='() => SortResults("time")'>Time</th>
+                            }
+                            <th class="@_resultsSort.HeaderClass("gap")" data-col="gap" @onclick='() => SortResults("gap")'>Gap</th>
+                            <th class="@_resultsSort.HeaderClass("laps")" data-col="laps" @onclick='() => SortResults("laps")'>Laps</th>
+                            <th class="@_resultsSort.HeaderClass("status")" data-col="status" @onclick='() => SortResults("status")'>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in rows)
+                        {
+                            var isLeader = r.Position == 1 && !r.Dnf && !r.Dns && !r.Dsq;
+                            var gapText = isLeader
+                                ? "Leader"
+                                : FormatResultsGap(r, segmented, pole);
+                            <tr class="@ResultDisplay.PodiumClass(r.Position)">
+                                <td class="col-pos">
+                                    <span class="pos-badge">@(r.Position?.ToString() ?? "—")</span>
+                                </td>
+                                <td class="col-no mono">@r.DriverNumber</td>
+                                <td>
+                                    <div class="driver-cell">
+                                        <span class="team-stripe" style="background: @TeamColors.ForTeam(r.TeamName)" title="@(r.TeamName ?? "Team")"></span>
+                                        <div class="driver-meta">
+                                            <span class="name">@(r.DriverName ?? r.NameAcronym ?? "—")</span>
+                                            <span class="team">@(r.TeamName ?? "—")</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                @if (segmented)
+                                {
+                                    @foreach (var s in Enumerable.Range(0, segments))
+                                    {
+                                        var t = ResultDisplay.SegmentAt(r.DurationJson, s);
+                                        <td class="mono @SegmentBestClass(s, t)">@ResultDisplay.FormatLapSeconds(t)</td>
+                                    }
+                                }
+                                else
+                                {
+                                    var t = ResultDisplay.FinalSegmentTime(r.DurationJson);
+                                    <td class="mono @RaceBestClass(t)">@ResultDisplay.FormatLapSeconds(t)</td>
+                                }
+                                <td class="mono gap-cell @(isLeader ? "is-leader" : null)">@gapText</td>
+                                <td class="mono">@(r.NumberOfLaps?.ToString() ?? "—")</td>
+                                <td>
+                                    @if (r.Dnf) { <span class="ft-badge ft-badge-dnf">DNF</span> }
+                                    else if (r.Dns) { <span class="ft-badge ft-badge-dns">DNS</span> }
+                                    else if (r.Dsq) { <span class="ft-badge ft-badge-dsq">DSQ</span> }
+                                    else { <span class="text-muted">—</span> }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="ft-card"><p class="mb-0 text-muted">No results for this session.</p></div>
+        }
+    }
+    else if (_tab == "laps")
+    {
+        @if (_lapsLoading)
+        {
+            <p class="text-muted"><em>Loading laps…</em></p>
+        }
+        else if (_evaluatedLaps is { Count: > 0 })
+        {
+            var laps = SortedLaps().ToList();
+            <p class="text-muted mb-2">
+                @laps.Count rows ·
+                <span class="timing-purple">purple</span> = overall best ·
+                <span class="timing-green">green</span> = personal best ·
+                <span class="timing-yellow">yellow</span> = no improvement
+            </p>
+            <div class="ft-card results-wrap" style="max-height: 36rem;">
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th class="@_lapsSort.HeaderClass("lap")" @onclick='() => SortLaps("lap")'>Lap</th>
+                            <th class="@_lapsSort.HeaderClass("driver")" @onclick='() => SortLaps("driver")'>Driver</th>
+                            <th class="@_lapsSort.HeaderClass("time")" @onclick='() => SortLaps("time")'>Lap time</th>
+                            <th class="@_lapsSort.HeaderClass("s1")" @onclick='() => SortLaps("s1")'>Sector 1</th>
+                            <th class="@_lapsSort.HeaderClass("s2")" @onclick='() => SortLaps("s2")'>Sector 2</th>
+                            <th class="@_lapsSort.HeaderClass("s3")" @onclick='() => SortLaps("s3")'>Sector 3</th>
+                            <th class="@_lapsSort.HeaderClass("st")" @onclick='() => SortLaps("st")'>ST</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var lap in laps)
+                        {
+                            <tr>
+                                <td class="mono">
+                                    @lap.LapNumber
+                                    @if (lap.IsPitOutLap == true)
+                                    {
+                                        <span class="ft-badge ft-badge-out" title="Pit out lap — incomplete timing">OUT</span>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="driver-cell">
+                                        <span class="team-stripe" style="background: @TeamColors.ForTeam(lap.TeamName)" title="@(lap.TeamName ?? "Team")"></span>
+                                        <div class="driver-meta">
+                                            <span class="name">@lap.DisplayName</span>
+                                            <span class="team">#@lap.DriverNumber@(string.IsNullOrEmpty(lap.TeamName) ? "" : $" · {lap.TeamName}")</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="mono @TimingColorCss.Class(lap.LapTime.Color)">@ResultDisplay.FormatLapSeconds(lap.LapTime.Seconds)</td>
+                                <td class="mono @TimingColorCss.Class(lap.Sector1.Color)">@ResultDisplay.FormatLapSeconds(lap.Sector1.Seconds)</td>
+                                <td class="mono @TimingColorCss.Class(lap.Sector2.Color)">@ResultDisplay.FormatLapSeconds(lap.Sector2.Seconds)</td>
+                                <td class="mono @TimingColorCss.Class(lap.Sector3.Color)">@ResultDisplay.FormatLapSeconds(lap.Sector3.Seconds)</td>
+                                <td class="mono">@(lap.StSpeed?.ToString() ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="ft-card"><p class="mb-0 text-muted">No laps for this session.</p></div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public int SessionKey { get; set; }
+
+    private SessionDto? _session;
+    private List<SessionResultDto>? _results;
+    private List<EvaluatedLap>? _evaluatedLaps;
+    private bool _loading = true;
+    private bool _lapsLoading;
+    private string _tab = "results";
+    private string? _error;
+    private int _loadedKey = -1;
+
+    private readonly List<double?> _segmentBests = [];
+    private double? _raceBest;
+
+    private readonly TableSortState _resultsSort = new("pos");
+    private readonly TableSortState _lapsSort = new("lap");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (SessionKey == _loadedKey && _session is not null) return;
+
+        _loading = true;
+        _error = null;
+        _tab = "results";
+        _evaluatedLaps = null;
+        _segmentBests.Clear();
+        _raceBest = null;
+        _resultsSort.Reset("pos");
+        _lapsSort.Reset("lap");
+        try
+        {
+            _session = await Api.GetSessionAsync(SessionKey);
+            _results = _session is null ? null : await Api.GetResultsAsync(SessionKey);
+            ComputeResultBests();
+            _loadedKey = SessionKey;
+        }
+        catch (Exception ex)
+        {
+            _error = $"API error: {ex.Message}";
+            _loadedKey = -1;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SortResults(string column) => _resultsSort.Toggle(column);
+
+    private void SortLaps(string column) => _lapsSort.Toggle(column);
+
+    private IEnumerable<SessionResultDto> SortedResults(bool segmented, int segments, SessionResultDto? pole)
+    {
+        if (_results is null) return [];
+
+        return _resultsSort.Column switch
+        {
+            "no" => _resultsSort.Apply(_results, r => (IComparable?)r.DriverNumber),
+            "driver" => _resultsSort.Apply(_results, r => (IComparable?)(r.DriverName ?? r.NameAcronym ?? "")),
+            "time" => _resultsSort.Apply(_results, r => (IComparable?)ResultDisplay.FinalSegmentTime(r.DurationJson)),
+            "gap" => _resultsSort.Apply(_results, r => (IComparable?)GapSortKey(r, segmented, pole)),
+            "laps" => _resultsSort.Apply(_results, r => (IComparable?)r.NumberOfLaps),
+            "status" => _resultsSort.Apply(_results, r => (IComparable?)StatusSortKey(r)),
+            var col when col.StartsWith("q", StringComparison.Ordinal) &&
+                         int.TryParse(col.AsSpan(1), out var qi) =>
+                _resultsSort.Apply(_results, r => (IComparable?)ResultDisplay.SegmentAt(r.DurationJson, qi)),
+            _ => _resultsSort.Apply(_results, r => (IComparable?)r.Position)
+        };
+    }
+
+    private IEnumerable<EvaluatedLap> SortedLaps()
+    {
+        if (_evaluatedLaps is null) return [];
+
+        return _lapsSort.Column switch
+        {
+            "driver" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.DisplayName),
+            "time" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.LapTime.Seconds),
+            "s1" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector1.Seconds),
+            "s2" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector2.Seconds),
+            "s3" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector3.Seconds),
+            "st" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.StSpeed),
+            _ => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.LapNumber)
+        };
+    }
+
+    private static double? GapSortKey(SessionResultDto r, bool segmented, SessionResultDto? pole)
+    {
+        if (r.Position == 1 && !r.Dnf && !r.Dns && !r.Dsq) return 0;
+
+        if (!segmented)
+        {
+            var parts = ResultDisplay.ParseSecondsParts(r.GapToLeaderJson);
+            for (var i = parts.Count - 1; i >= 0; i--)
+            {
+                if (parts[i] is not null) return parts[i];
+            }
+
+            return null;
+        }
+
+        if (pole is null) return null;
+        var poleParts = ResultDisplay.ParseSecondsParts(pole.DurationJson);
+        var myParts = ResultDisplay.ParseSecondsParts(r.DurationJson);
+        var decisive = -1;
+        for (var i = poleParts.Count - 1; i >= 0; i--)
+        {
+            if (poleParts[i] is > 0)
+            {
+                decisive = i;
+                break;
+            }
+        }
+
+        if (decisive < 0 || decisive >= myParts.Count || myParts[decisive] is not > 0) return null;
+        return myParts[decisive]!.Value - poleParts[decisive]!.Value;
+    }
+
+    private static int StatusSortKey(SessionResultDto r)
+    {
+        if (r.Dsq) return 3;
+        if (r.Dnf) return 2;
+        if (r.Dns) return 1;
+        return 0;
+    }
+
+    private void ComputeResultBests()
+    {
+        _segmentBests.Clear();
+        _raceBest = null;
+        if (_results is null || _results.Count == 0) return;
+
+        if (ResultDisplay.IsSegmentedResults(_results))
+        {
+            var n = ResultDisplay.MaxSegmentCount(_results);
+            for (var s = 0; s < n; s++)
+            {
+                double? best = null;
+                foreach (var r in _results)
+                {
+                    var t = ResultDisplay.SegmentAt(r.DurationJson, s);
+                    if (t is > 0 && (best is null || t < best)) best = t;
+                }
+
+                _segmentBests.Add(best);
+            }
+        }
+        else
+        {
+            foreach (var r in _results)
+            {
+                var t = ResultDisplay.FinalSegmentTime(r.DurationJson);
+                if (t is > 0 && (_raceBest is null || t < _raceBest)) _raceBest = t;
+            }
+        }
+    }
+
+    private string FormatResultsGap(SessionResultDto r, bool segmented, SessionResultDto? pole)
+    {
+        if (!segmented)
+        {
+            return ResultDisplay.FormatGap(r.GapToLeaderJson);
+        }
+
+        if (pole is null) return "—";
+
+        var poleParts = ResultDisplay.ParseSecondsParts(pole.DurationJson);
+        var myParts = ResultDisplay.ParseSecondsParts(r.DurationJson);
+        var decisive = -1;
+        for (var i = poleParts.Count - 1; i >= 0; i--)
+        {
+            if (poleParts[i] is > 0)
+            {
+                decisive = i;
+                break;
+            }
+        }
+
+        if (decisive < 0) return "—";
+        if (decisive >= myParts.Count || myParts[decisive] is not > 0) return "—";
+
+        return ResultDisplay.FormatGapDelta(myParts[decisive]!.Value - poleParts[decisive]!.Value);
+    }
+
+    private string SegmentBestClass(int segmentIndex, double? time)
+    {
+        if (time is null or <= 0) return "";
+        if (segmentIndex < 0 || segmentIndex >= _segmentBests.Count) return "";
+        var best = _segmentBests[segmentIndex];
+        if (best is not null && Math.Abs(time.Value - best.Value) < 0.0005) return "cell-sb";
+        return "";
+    }
+
+    private string RaceBestClass(double? time)
+    {
+        if (time is null or <= 0 || _raceBest is null) return "";
+        return Math.Abs(time.Value - _raceBest.Value) < 0.0005 ? "cell-sb" : "";
+    }
+
+    private async Task ShowLapsAsync()
+    {
+        _tab = "laps";
+        if (_evaluatedLaps is not null || _session is null) return;
+
+        _lapsLoading = true;
+        try
+        {
+            var raw = await Api.GetLapsAsync(SessionKey) ?? [];
+            _evaluatedLaps = LapTimingEvaluator.Evaluate(raw).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"API error loading laps: {ex.Message}";
+        }
+        finally
+        {
+            _lapsLoading = false;
+        }
+    }
+}
