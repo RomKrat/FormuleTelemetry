@@ -64,3 +64,15 @@ public sealed class LapDto
     public string? TeamName { get; set; }
     public string? NameAcronym { get; set; }
 }
+
+/// <summary>One lap sample for the Race Pace chart.</summary>
+public sealed class LapTimePointDto
+{
+    public int LapNumber { get; set; }
+    public double LapTimeSeconds { get; set; }
+    public string? DriverCode { get; set; }
+    public int DriverNumber { get; set; }
+    public string? Compound { get; set; }
+    public int? TyreAge { get; set; }
+    public bool IsPitLap { get; set; }
+}

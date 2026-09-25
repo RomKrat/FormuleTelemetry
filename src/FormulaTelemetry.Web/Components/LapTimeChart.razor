@@ -1,0 +1,311 @@
+@using System.Globalization
+
+<div class="pace-chart ft-card">
+    <div class="pace-toolbar d-flex flex-wrap align-items-center gap-2 mb-3">
+        <label class="pace-toggle mb-0">
+            <input type="checkbox" @bind="_hidePitLaps" @bind:after="OnFilterChanged" />
+            Skrýt kola s Pit Stopem
+        </label>
+        <label class="pace-toggle mb-0">
+            <input type="checkbox" @bind="_clipOutliers" @bind:after="OnFilterChanged" />
+            Oříznout odlehlé časy
+        </label>
+        @if (_clipOutliers)
+        {
+            <label class="pace-max mb-0">
+                Max
+                <input class="form-control pace-max-input" type="number" step="1" min="60" max="300"
+                       @bind="_maxLapSeconds" @bind:event="onchange" @bind:after="OnFilterChanged" />
+                <span class="text-muted mono">(@FormatAxisTime(_maxLapSeconds))</span>
+            </label>
+        }
+        <span class="text-muted mono" style="font-size: 0.75rem;">Y = lap time (faster up)</span>
+    </div>
+
+    @if (_driverOptions.Count > 0)
+    {
+        <div class="pace-drivers mb-3">
+            @foreach (var d in _driverOptions)
+            {
+                var selected = _selectedDrivers.Contains(d.Number);
+                <label class="pace-driver-chip @(selected ? "is-on" : null)" style="--chip: @d.Color">
+                    <input type="checkbox" checked="@selected" @onchange="() => ToggleDriver(d.Number)" />
+                    <span class="swatch"></span>
+                    @(d.Code ?? $"#{d.Number}")
+                </label>
+            }
+        </div>
+    }
+
+    @if (!_hasPlot)
+    {
+        <p class="mb-0 text-muted">No lap times to plot for the selected drivers.</p>
+    }
+    else
+    {
+        <div class="pace-svg-wrap" @onmouseleave="ClearTip">
+            <svg class="pace-svg" viewBox="0 0 @_vbW @_vbH" role="img" aria-label="Lap time pace chart">
+                <rect x="@_padL" y="@_padT" width="@_plotW" height="@_plotH" class="pace-plot-bg" />
+
+                @foreach (var tick in _yTicks)
+                {
+                    var y = MapY(tick);
+                    <line x1="@_padL" y1="@y" x2="@(_padL + _plotW)" y2="@y" class="pace-grid" />
+                    @SvgText(_padL - 8, y + 4, FormatAxisTime(tick), "end")
+                }
+
+                @foreach (var lap in _xTicks)
+                {
+                    var x = MapX(lap);
+                    <line x1="@x" y1="@_padT" x2="@x" y2="@(_padT + _plotH)" class="pace-grid" />
+                    @SvgText(x, _padT + _plotH + 18, lap.ToString(CultureInfo.InvariantCulture), "middle")
+                }
+
+                @foreach (var series in _series)
+                {
+                    <polyline points="@series.PointsAttr" fill="none" stroke="@series.Color" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                    @foreach (var pt in series.Points)
+                    {
+                        var cx = MapX(pt.LapNumber);
+                        var cy = MapY(pt.LapTimeSeconds);
+                        <circle cx="@cx" cy="@cy" r="3.5"
+                                fill="@CompoundColor(pt.Compound, series.Color)"
+                                stroke="@series.Color"
+                                stroke-width="1.25"
+                                class="pace-dot"
+                                @onmouseenter="() => ShowTip(pt, series.Color)" />
+                    }
+                }
+
+                @SvgText(_padL + _plotW / 2, _vbH - 6, "Lap", "middle", "pace-axis-title")
+            </svg>
+
+            @if (_tip is not null)
+            {
+                <div class="pace-tip">
+                    <strong>@_tip.Driver</strong>
+                    <span>Lap @_tip.Lap</span>
+                    <span class="mono">@_tip.Time</span>
+                    <span>@(string.IsNullOrEmpty(_tip.Compound) ? "—" : _tip.Compound)</span>
+                    <span>Age @(_tip.TyreAge?.ToString() ?? "—")</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<LapTimePointDto> Points { get; set; } = [];
+    [Parameter] public IReadOnlyDictionary<int, string>? TeamByDriver { get; set; }
+
+    private static readonly string[] FallbackPalette =
+        ["#E8A317", "#22D3EE", "#2BBF6A", "#C084FC", "#F07178", "#64C4FF", "#FF8000", "#A1A1AA"];
+
+    private bool _hidePitLaps = true;
+    private bool _clipOutliers = true;
+    private double _maxLapSeconds = 110; // 1:50 — caps SC / in-lap outliers on Y scale
+    private readonly HashSet<int> _selectedDrivers = new();
+    private List<DriverOpt> _driverOptions = [];
+    private List<SeriesGeom> _series = [];
+    private List<int> _xTicks = [];
+    private List<double> _yTicks = [];
+    private bool _hasPlot;
+    private TipState? _tip;
+
+    private const double _vbW = 800;
+    private const double _vbH = 380;
+    private const double _padL = 64;
+    private const double _padR = 16;
+    private const double _padT = 36; // room for top markers / tip
+    private const double _padB = 36;
+    private double _plotW => _vbW - _padL - _padR;
+    private double _plotH => _vbH - _padT - _padB;
+
+    private double _minLap, _maxLap, _minTime, _maxTime;
+
+    protected override void OnParametersSet()
+    {
+        RebuildDrivers();
+        RebuildGeometry();
+    }
+
+    private void RebuildDrivers()
+    {
+        _driverOptions = Points
+            .GroupBy(p => p.DriverNumber)
+            .OrderBy(g => g.Key)
+            .Select((g, i) =>
+            {
+                var team = TeamByDriver is not null && TeamByDriver.TryGetValue(g.Key, out var t) ? t : null;
+                var color = string.IsNullOrWhiteSpace(team)
+                    ? FallbackPalette[i % FallbackPalette.Length]
+                    : TeamColors.ForTeam(team);
+                var code = g.Select(x => x.DriverCode).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))
+                           ?? $"#{g.Key}";
+                return new DriverOpt(g.Key, code, color);
+            })
+            .ToList();
+
+        if (_selectedDrivers.Count == 0 || _selectedDrivers.All(n => _driverOptions.All(d => d.Number != n)))
+        {
+            _selectedDrivers.Clear();
+            foreach (var d in _driverOptions.Take(3))
+            {
+                _selectedDrivers.Add(d.Number);
+            }
+        }
+        else
+        {
+            _selectedDrivers.RemoveWhere(n => _driverOptions.All(d => d.Number != n));
+            if (_selectedDrivers.Count == 0)
+            {
+                foreach (var d in _driverOptions.Take(3))
+                {
+                    _selectedDrivers.Add(d.Number);
+                }
+            }
+        }
+    }
+
+    private void OnFilterChanged() => RebuildGeometry();
+
+    private void ToggleDriver(int number)
+    {
+        if (!_selectedDrivers.Add(number))
+        {
+            if (_selectedDrivers.Count > 1)
+            {
+                _selectedDrivers.Remove(number);
+            }
+        }
+
+        RebuildGeometry();
+    }
+
+    private void RebuildGeometry()
+    {
+        _tip = null;
+        var filtered = Points
+            .Where(p => p.LapTimeSeconds > 0)
+            .Where(p => !_hidePitLaps || !p.IsPitLap)
+            .Where(p => !_clipOutliers || p.LapTimeSeconds <= _maxLapSeconds)
+            .Where(p => _selectedDrivers.Contains(p.DriverNumber))
+            .ToList();
+
+        _hasPlot = filtered.Count >= 2;
+        _series = [];
+        _xTicks = [];
+        _yTicks = [];
+        if (!_hasPlot) return;
+
+        _minLap = filtered.Min(p => p.LapNumber);
+        _maxLap = filtered.Max(p => p.LapNumber);
+        _minTime = filtered.Min(p => p.LapTimeSeconds);
+        _maxTime = filtered.Max(p => p.LapTimeSeconds);
+        if (Math.Abs(_maxLap - _minLap) < 0.5) { _minLap -= 0.5; _maxLap += 0.5; }
+        if (Math.Abs(_maxTime - _minTime) < 0.05) { _minTime -= 0.25; _maxTime += 0.25; }
+        else
+        {
+            var pad = (_maxTime - _minTime) * 0.08;
+            _minTime -= pad;
+            _maxTime += pad;
+        }
+
+        _xTicks = BuildIntTicks((int)Math.Floor(_minLap), (int)Math.Ceiling(_maxLap));
+        _yTicks = BuildDoubleTicks(_minTime, _maxTime, 5);
+
+        _series = filtered
+            .GroupBy(p => p.DriverNumber)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var opt = _driverOptions.First(d => d.Number == g.Key);
+                var pts = g.OrderBy(p => p.LapNumber).ToList();
+                var attr = string.Join(" ", pts.Select(p =>
+                    $"{MapX(p.LapNumber).ToString("0.##", CultureInfo.InvariantCulture)},{MapY(p.LapTimeSeconds).ToString("0.##", CultureInfo.InvariantCulture)}"));
+                return new SeriesGeom(opt.Number, opt.Code ?? $"#{opt.Number}", opt.Color, pts, attr);
+            })
+            .ToList();
+    }
+
+    private double MapX(double lap) =>
+        _padL + (lap - _minLap) / (_maxLap - _minLap) * _plotW;
+
+    // SVG Y grows downward → faster (lower seconds) maps to smaller Y (top).
+    private double MapY(double seconds) =>
+        _padT + (seconds - _minTime) / (_maxTime - _minTime) * _plotH;
+
+    private void ShowTip(LapTimePointDto p, string color)
+    {
+        _tip = new TipState(
+            p.DriverCode ?? $"#{p.DriverNumber}",
+            p.LapNumber,
+            ResultDisplay.FormatLapSeconds(p.LapTimeSeconds),
+            p.Compound,
+            p.TyreAge,
+            color);
+    }
+
+    private void ClearTip() => _tip = null;
+
+    private static MarkupString SvgText(double x, double y, string content, string anchor, string cssClass = "pace-axis-label")
+    {
+        var xi = x.ToString("0.##", CultureInfo.InvariantCulture);
+        var yi = y.ToString("0.##", CultureInfo.InvariantCulture);
+        var safe = System.Net.WebUtility.HtmlEncode(content);
+        return new MarkupString(
+            $"<text x=\"{xi}\" y=\"{yi}\" text-anchor=\"{anchor}\" class=\"{cssClass}\">{safe}</text>");
+    }
+
+    private static string CompoundColor(string? compound, string fallback)
+    {
+        var c = (compound ?? "").Trim().ToUpperInvariant();
+        return c switch
+        {
+            "SOFT" => "#E74C5C",
+            "MEDIUM" => "#F0C419",
+            "HARD" => "#E8EAED",
+            "INTERMEDIATE" or "INTER" => "#2BBF6A",
+            "WET" => "#3B82F6",
+            _ => fallback
+        };
+    }
+
+    private static string FormatAxisTime(double seconds)
+    {
+        if (seconds >= 60)
+        {
+            var m = (int)(seconds / 60);
+            var rem = seconds - m * 60;
+            return $"{m}:{rem.ToString("00.0", CultureInfo.InvariantCulture)}";
+        }
+
+        return seconds.ToString("0.0", CultureInfo.InvariantCulture);
+    }
+
+    private static List<int> BuildIntTicks(int min, int max)
+    {
+        var span = Math.Max(1, max - min);
+        var step = span <= 10 ? 1 : span <= 25 ? 2 : span <= 50 ? 5 : 10;
+        var list = new List<int>();
+        for (var v = min; v <= max; v += step) list.Add(v);
+        if (list.Count == 0 || list[^1] != max) list.Add(max);
+        return list;
+    }
+
+    private static List<double> BuildDoubleTicks(double min, double max, int count)
+    {
+        var list = new List<double>();
+        if (count < 2) return [min, max];
+        for (var i = 0; i < count; i++)
+        {
+            list.Add(min + (max - min) * i / (count - 1));
+        }
+
+        return list;
+    }
+
+    private sealed record DriverOpt(int Number, string? Code, string Color);
+    private sealed record SeriesGeom(int Number, string Code, string Color, List<LapTimePointDto> Points, string PointsAttr);
+    private sealed record TipState(string Driver, int Lap, string Time, string? Compound, int? TyreAge, string Color);
+}

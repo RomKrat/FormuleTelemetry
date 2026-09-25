@@ -26,6 +26,9 @@ else
         <li class="nav-item">
             <button type="button" class="nav-link @(_tab == "laps" ? "active" : null)" @onclick="ShowLapsAsync">Laps</button>
         </li>
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_tab == "pace" ? "active" : null)" @onclick="ShowPaceAsync">Pace</button>
+        </li>
     </ul>
 
     @if (_tab == "results")
@@ -179,6 +182,21 @@ else
             <div class="ft-card"><p class="mb-0 text-muted">No laps for this session.</p></div>
         }
     }
+    else if (_tab == "pace")
+    {
+        @if (_lapsLoading)
+        {
+            <p class="text-muted"><em>Loading pace data…</em></p>
+        }
+        else if (_pacePoints is { Count: > 0 })
+        {
+            <LapTimeChart Points="_pacePoints" TeamByDriver="_paceTeams" />
+        }
+        else
+        {
+            <div class="ft-card"><p class="mb-0 text-muted">No lap times available for pace chart.</p></div>
+        }
+    }
 }
 
 @code {
@@ -187,6 +205,8 @@ else
     private SessionDto? _session;
     private List<SessionResultDto>? _results;
     private List<EvaluatedLap>? _evaluatedLaps;
+    private List<LapTimePointDto>? _pacePoints;
+    private Dictionary<int, string>? _paceTeams;
     private bool _loading = true;
     private bool _lapsLoading;
     private string _tab = "results";
@@ -207,6 +227,8 @@ else
         _error = null;
         _tab = "results";
         _evaluatedLaps = null;
+        _pacePoints = null;
+        _paceTeams = null;
         _segmentBests.Clear();
         _raceBest = null;
         _resultsSort.Reset("pos");
@@ -384,6 +406,17 @@ else
     private async Task ShowLapsAsync()
     {
         _tab = "laps";
+        await EnsureLapsLoadedAsync();
+    }
+
+    private async Task ShowPaceAsync()
+    {
+        _tab = "pace";
+        await EnsureLapsLoadedAsync();
+    }
+
+    private async Task EnsureLapsLoadedAsync()
+    {
         if (_evaluatedLaps is not null || _session is null) return;
 
         _lapsLoading = true;
@@ -391,6 +424,11 @@ else
         {
             var raw = await Api.GetLapsAsync(SessionKey) ?? [];
             _evaluatedLaps = LapTimingEvaluator.Evaluate(raw).ToList();
+            _pacePoints = MapPacePoints(raw);
+            _paceTeams = raw
+                .Where(l => !string.IsNullOrWhiteSpace(l.TeamName))
+                .GroupBy(l => l.DriverNumber)
+                .ToDictionary(g => g.Key, g => g.First().TeamName!);
         }
         catch (Exception ex)
         {
@@ -401,4 +439,21 @@ else
             _lapsLoading = false;
         }
     }
+
+    private static List<LapTimePointDto> MapPacePoints(IEnumerable<LapDto> laps) =>
+        laps
+            .Where(l => l.LapDuration is > 0)
+            .Select(l => new LapTimePointDto
+            {
+                LapNumber = l.LapNumber,
+                LapTimeSeconds = l.LapDuration!.Value,
+                DriverCode = l.NameAcronym,
+                DriverNumber = l.DriverNumber,
+                Compound = null,
+                TyreAge = null,
+                IsPitLap = l.IsPitOutLap == true
+            })
+            .OrderBy(p => p.DriverNumber)
+            .ThenBy(p => p.LapNumber)
+            .ToList();
 }

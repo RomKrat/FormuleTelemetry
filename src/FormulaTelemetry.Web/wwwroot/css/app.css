@@ -272,6 +272,108 @@ a:hover { color: var(--accent); text-decoration: underline; }
     font-size: 0.85rem;
 }
 
+/* Race Pace chart */
+.pace-chart { padding: 1rem 1.1rem 1.15rem; }
+.pace-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+.pace-toggle input { accent-color: var(--accent); }
+.pace-max {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+.pace-max-input {
+    width: 4.5rem;
+    padding: 0.25rem 0.4rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+}
+.pace-drivers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.pace-driver-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.pace-driver-chip input { display: none; }
+.pace-driver-chip .swatch {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--chip, var(--muted));
+}
+.pace-driver-chip.is-on {
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--chip, var(--accent)) 55%, var(--border));
+    background: color-mix(in srgb, var(--chip, var(--accent)) 14%, transparent);
+}
+.pace-svg-wrap { position: relative; }
+.pace-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: transparent;
+}
+.pace-plot-bg {
+    fill: var(--surface-2);
+    stroke: var(--border);
+    stroke-width: 1;
+}
+.pace-grid {
+    stroke: var(--grid);
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+}
+.pace-axis-label {
+    fill: var(--muted);
+    font-size: 10px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.pace-axis-title {
+    fill: var(--muted);
+    font-size: 11px;
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+.pace-dot { cursor: crosshair; }
+.pace-tip {
+    position: absolute;
+    right: 0.75rem;
+    top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    color: var(--text);
+    font-size: 0.78rem;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.pace-tip strong { color: var(--accent); }
+
 /* Badges */
 .ft-badge {
     display: inline-flex;
