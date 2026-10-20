@@ -66,3 +66,21 @@ public sealed record StintDto(
     int? LapEnd,
     string? Compound,
     int? TyreAgeAtStart);
+
+/// <summary>Start timestamp of a qualifying segment (Q1/Q2/Q3) from race control.</summary>
+public sealed record QualifyingPhaseDto(
+    int Phase,
+    DateTimeOffset Start);
+
+public sealed record StartingGridEntryDto(
+    int SessionKey,
+    int DriverNumber,
+    int MeetingKey,
+    int Position,
+    double? LapDuration);
+
+/// <summary>Race/session position for a driver at the end of a given lap.</summary>
+public sealed record LapPositionDto(
+    int DriverNumber,
+    int LapNumber,
+    int Position);

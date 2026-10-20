@@ -1,0 +1,116 @@
+@using FormulaTelemetry.Web.Models
+
+<div class="pace-drivers driver-selection-bar @CssClass" role="group" aria-label="Driver selection">
+    <div class="driver-sel-actions" role="group" aria-label="Bulk driver selection">
+        <button type="button"
+                class="driver-sel-action"
+                title="Select all drivers"
+                disabled="@(_allSelected || Drivers.Count == 0)"
+                @onclick="SelectAllAsync">
+            Select All
+        </button>
+        <button type="button"
+                class="driver-sel-action"
+                title="Keep only the first driver"
+                disabled="@(_atMinimum || Drivers.Count == 0)"
+                @onclick="ClearToMinimumAsync">
+            None
+        </button>
+    </div>
+
+    @foreach (var d in Drivers)
+    {
+        var selected = Selected.Contains(d.Number);
+        var focused = FocusedDriver == d.Number;
+        <button type="button"
+                class="pace-driver-chip @(selected ? "is-on" : null) @(focused ? "is-focus" : null)"
+                style="--chip: @d.Color"
+                title="Click to toggle · Alt/Ctrl/Shift+click for solo"
+                @onclick="e => OnChipClickAsync(d.Number, e)"
+                @onmouseenter="() => OnHoverAsync(d.Number)"
+                @onmouseleave="() => OnHoverAsync(null)">
+            <span class="swatch" aria-hidden="true"></span>
+            <span class="code">@d.Code</span>
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<DriverChipOption> Drivers { get; set; } = [];
+    [Parameter] public IReadOnlyCollection<int> Selected { get; set; } = Array.Empty<int>();
+    [Parameter] public EventCallback<IReadOnlySet<int>> SelectedChanged { get; set; }
+    [Parameter] public int? FocusedDriver { get; set; }
+    [Parameter] public EventCallback<int?> FocusedDriverChanged { get; set; }
+    /// <summary>Minimum drivers that must remain selected (None keeps this many).</summary>
+    [Parameter] public int MinSelected { get; set; } = 1;
+    [Parameter] public string? CssClass { get; set; }
+
+    private bool _allSelected =>
+        Drivers.Count > 0 && Drivers.All(d => Selected.Contains(d.Number));
+
+    private bool _atMinimum =>
+        Selected.Count <= Math.Max(0, MinSelected);
+
+    private async Task SelectAllAsync()
+    {
+        if (Drivers.Count == 0 || _allSelected) return;
+        await EmitAsync(Drivers.Select(d => d.Number).ToHashSet());
+    }
+
+    private async Task ClearToMinimumAsync()
+    {
+        if (Drivers.Count == 0 || _atMinimum) return;
+        var keep = Math.Clamp(MinSelected, 0, Drivers.Count);
+        var next = Drivers.Take(keep).Select(d => d.Number).ToHashSet();
+        await EmitAsync(next);
+    }
+
+    private async Task OnChipClickAsync(int number, MouseEventArgs e)
+    {
+        if (Drivers.All(d => d.Number != number)) return;
+
+        // Solo: Alt / Ctrl / Shift + click
+        if (e.AltKey || e.CtrlKey || e.ShiftKey || e.MetaKey)
+        {
+            var onlyThis = Selected.Count == 1 && Selected.Contains(number);
+            if (onlyThis)
+            {
+                await SelectAllAsync();
+            }
+            else
+            {
+                await EmitAsync(new HashSet<int> { number });
+            }
+
+            return;
+        }
+
+        var next = Selected.ToHashSet();
+        if (!next.Add(number))
+        {
+            if (next.Count > Math.Max(1, MinSelected))
+            {
+                next.Remove(number);
+            }
+        }
+
+        await EmitAsync(next);
+    }
+
+    private async Task OnHoverAsync(int? number)
+    {
+        if (FocusedDriverChanged.HasDelegate)
+        {
+            await FocusedDriverChanged.InvokeAsync(number);
+        }
+    }
+
+    private async Task EmitAsync(HashSet<int> next)
+    {
+        // Single batch callback — parent rebuilds once.
+        if (SelectedChanged.HasDelegate)
+        {
+            await SelectedChanged.InvokeAsync(next);
+        }
+    }
+}

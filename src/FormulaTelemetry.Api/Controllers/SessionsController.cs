@@ -59,4 +59,43 @@ public sealed class SessionsController : ControllerBase
         var stints = await _store.GetStintsAsync(sessionKey, cancellationToken);
         return Ok(stints);
     }
+
+    [HttpGet("{sessionKey:int}/qualifying-phases")]
+    public async Task<IActionResult> GetQualifyingPhases(int sessionKey, CancellationToken cancellationToken)
+    {
+        var session = await _store.GetSessionAsync(sessionKey, cancellationToken);
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var phases = await _store.GetQualifyingPhasesAsync(sessionKey, cancellationToken);
+        return Ok(phases);
+    }
+
+    [HttpGet("{sessionKey:int}/starting-grid")]
+    public async Task<IActionResult> GetStartingGrid(int sessionKey, CancellationToken cancellationToken)
+    {
+        var session = await _store.GetSessionAsync(sessionKey, cancellationToken);
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var grid = await _store.GetStartingGridAsync(sessionKey, cancellationToken);
+        return Ok(grid);
+    }
+
+    [HttpGet("{sessionKey:int}/lap-positions")]
+    public async Task<IActionResult> GetLapPositions(int sessionKey, CancellationToken cancellationToken)
+    {
+        var session = await _store.GetSessionAsync(sessionKey, cancellationToken);
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var positions = await _store.GetLapPositionsAsync(sessionKey, cancellationToken);
+        return Ok(positions);
+    }
 }

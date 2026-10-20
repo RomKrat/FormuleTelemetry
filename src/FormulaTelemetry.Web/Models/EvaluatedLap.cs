@@ -22,9 +22,13 @@ public sealed class EvaluatedLap
     public TimedSplit Sector2 { get; init; } = TimedSplit.Empty;
     public TimedSplit Sector3 { get; init; } = TimedSplit.Empty;
 
+    /// <summary>1/2/3 for Q1/Q2/Q3 when session is qualifying; otherwise null.</summary>
+    public int? QualifyingPhase { get; set; }
+
     public int SessionKey => Source.SessionKey;
     public int DriverNumber => Source.DriverNumber;
     public int LapNumber => Source.LapNumber;
+    public DateTimeOffset? DateStart => Source.DateStart;
     public int? StSpeed => Source.StSpeed;
     public bool? IsPitOutLap => Source.IsPitOutLap;
     public string? DriverName => Source.DriverName;

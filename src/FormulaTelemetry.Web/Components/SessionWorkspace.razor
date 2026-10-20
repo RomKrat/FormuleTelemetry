@@ -37,10 +37,39 @@ else
         {
             var segmented = ResultDisplay.IsSegmentedResults(_results);
             var segments = segmented ? ResultDisplay.MaxSegmentCount(_results) : 0;
+            var cutoffs = segmented ? ResultDisplay.QualifyingCutoffs(_results, segments) : null;
+            var prefix = ResultDisplay.SegmentPrefix(_session.SessionName);
+            var focusSeg = segmented ? _qualiView : null; // null = Classification
             var pole = _results.FirstOrDefault(x => x.Position == 1);
-            var rows = SortedResults(segmented, segments, pole).ToList();
+            var rows = focusSeg is int fs
+                ? BuildSegmentViewRows(fs, segments).ToList()
+                : SortedResults(segmented, segments, pole)
+                    .Select(r => new ResultsRow(r, r.Position, null, null))
+                    .ToList();
+            var showElimDividers = cutoffs is not null && _resultsSort.Column == "pos";
+            var colCount = 5 + (segmented ? segments : 1);
+
+            @if (segmented && segments >= 2)
+            {
+                <div class="pace-metric quali-view-switch mb-2" role="group" aria-label="Qualifying results view">
+                    <button type="button"
+                            class="pace-metric-btn @(_qualiView is null ? "is-on" : null)"
+                            @onclick="() => SetQualiView(null)">
+                        Classification (Overall)
+                    </button>
+                    @foreach (var s in Enumerable.Range(0, segments))
+                    {
+                        <button type="button"
+                                class="pace-metric-btn @(_qualiView == s ? "is-on" : null)"
+                                @onclick="() => SetQualiView(s)">
+                            @ResultDisplay.SegmentHeader(s, segments, _session.SessionName) Results
+                        </button>
+                    }
+                </div>
+            }
+
             <div class="ft-card results-wrap">
-                <table class="results-table">
+                <table class="results-table @(segmented ? "is-quali" : null) @(focusSeg is int ? "has-quali-focus" : null)">
                     <thead>
                         <tr>
                             <th class="@_resultsSort.HeaderClass("pos")" data-col="pos" @onclick='() => SortResults("pos")'>Pos</th>
@@ -51,7 +80,8 @@ else
                                 @foreach (var s in Enumerable.Range(0, segments))
                                 {
                                     var col = $"q{s}";
-                                    <th class="@_resultsSort.HeaderClass(col)" data-col="@col" @onclick="() => SortResults(col)">
+                                    var focusCls = focusSeg == s ? "is-seg-focus" : focusSeg is int ? "is-seg-dim" : null;
+                                    <th class="@_resultsSort.HeaderClass(col) @focusCls" data-col="@col" @onclick="() => SortResults(col)">
                                         @ResultDisplay.SegmentHeader(s, segments, _session.SessionName)
                                     </th>
                                 }
@@ -66,15 +96,22 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var r in rows)
+                        @foreach (var row in rows)
                         {
-                            var isLeader = r.Position == 1 && !r.Dnf && !r.Dns && !r.Dsq;
-                            var gapText = isLeader
-                                ? "Leader"
-                                : FormatResultsGap(r, segmented, pole);
-                            <tr class="@ResultDisplay.PodiumClass(r.Position)">
+                            var r = row.Result;
+                            var displayPos = row.DisplayPos;
+                            var isLeader = focusSeg is int
+                                ? displayPos == 1
+                                : r.Position == 1 && !r.Dnf && !r.Dns && !r.Dsq;
+                            var gapText = focusSeg is int
+                                ? (isLeader ? "Leader" : ResultDisplay.FormatGapDelta(row.GapSeconds))
+                                : (isLeader ? "Leader" : FormatResultsGap(r, segmented, pole));
+                            var status = segmented
+                                ? ResultDisplay.QualifyingStatus(r, segments, _session.SessionName, cutoffs)
+                                : null;
+                            <tr class="@(focusSeg is null ? ResultDisplay.PodiumClass(r.Position) : ResultDisplay.PodiumClass(displayPos))">
                                 <td class="col-pos">
-                                    <span class="pos-badge">@(r.Position?.ToString() ?? "—")</span>
+                                    <span class="pos-badge">@(displayPos?.ToString() ?? "—")</span>
                                 </td>
                                 <td class="col-no mono">@r.DriverNumber</td>
                                 <td>
@@ -91,7 +128,10 @@ else
                                     @foreach (var s in Enumerable.Range(0, segments))
                                     {
                                         var t = ResultDisplay.SegmentAt(r.DurationJson, s);
-                                        <td class="mono @SegmentBestClass(s, t)">@ResultDisplay.FormatLapSeconds(t)</td>
+                                        var missed = t is null or <= 0;
+                                        var best = SegmentBestClass(s, t);
+                                        var focusCls = focusSeg == s ? "is-seg-focus" : focusSeg is int ? "is-seg-dim" : null;
+                                        <td class="mono @focusCls @(missed ? "cell-dnq" : best)">@ResultDisplay.FormatLapSeconds(t)</td>
                                     }
                                 }
                                 else
@@ -102,12 +142,70 @@ else
                                 <td class="mono gap-cell @(isLeader ? "is-leader" : null)">@gapText</td>
                                 <td class="mono">@(r.NumberOfLaps?.ToString() ?? "—")</td>
                                 <td>
-                                    @if (r.Dnf) { <span class="ft-badge ft-badge-dnf">DNF</span> }
+                                    @if (status is { } st)
+                                    {
+                                        <span class="@st.Css">@st.Label</span>
+                                    }
+                                    else if (r.Dnf) { <span class="ft-badge ft-badge-dnf">DNF</span> }
                                     else if (r.Dns) { <span class="ft-badge ft-badge-dns">DNS</span> }
                                     else if (r.Dsq) { <span class="ft-badge ft-badge-dsq">DSQ</span> }
                                     else { <span class="text-muted">—</span> }
                                 </td>
                             </tr>
+                            @if (showElimDividers && cutoffs is { } c && displayPos is int pos)
+                            {
+                                @if (focusSeg is null)
+                                {
+                                    if (pos == c.Q3Cutoff)
+                                    {
+                                        <tr class="quali-elim-row" aria-label="Eliminated in @($"{prefix}2")">
+                                            <td colspan="@colCount">
+                                                <div class="quali-elim-band is-q2">
+                                                    <span class="quali-elim-line"></span>
+                                                    <span class="quali-elim-label">OUT IN @($"{prefix}2")</span>
+                                                    <span class="quali-elim-line"></span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                    else if (pos == c.Q2Cutoff)
+                                    {
+                                        <tr class="quali-elim-row" aria-label="Eliminated in @($"{prefix}1")">
+                                            <td colspan="@colCount">
+                                                <div class="quali-elim-band is-q1">
+                                                    <span class="quali-elim-line"></span>
+                                                    <span class="quali-elim-label">OUT IN @($"{prefix}1")</span>
+                                                    <span class="quali-elim-line"></span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                                else if (focusSeg == 0 && pos == c.Q2Cutoff)
+                                {
+                                    <tr class="quali-elim-row" aria-label="Eliminated in @($"{prefix}1")">
+                                        <td colspan="@colCount">
+                                            <div class="quali-elim-band is-q1">
+                                                <span class="quali-elim-line"></span>
+                                                <span class="quali-elim-label">OUT IN @($"{prefix}1")</span>
+                                                <span class="quali-elim-line"></span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                                else if (focusSeg == 1 && pos == c.Q3Cutoff)
+                                {
+                                    <tr class="quali-elim-row" aria-label="Eliminated in @($"{prefix}2")">
+                                        <td colspan="@colCount">
+                                            <div class="quali-elim-band is-q2">
+                                                <span class="quali-elim-line"></span>
+                                                <span class="quali-elim-label">OUT IN @($"{prefix}2")</span>
+                                                <span class="quali-elim-line"></span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
                         }
                     </tbody>
                 </table>
@@ -127,12 +225,50 @@ else
         else if (_evaluatedLaps is { Count: > 0 })
         {
             var laps = SortedLaps().ToList();
-            <p class="text-muted mb-2">
-                @laps.Count rows ·
-                <span class="timing-purple">purple</span> = overall best ·
-                <span class="timing-green">green</span> = personal best ·
-                <span class="timing-yellow">yellow</span> = no improvement
-            </p>
+            var phaseOpts = _lapsQualiPhases;
+            var showPhaseUi = _showQualiFilter && phaseOpts.Count > 0;
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <p class="text-muted mb-0">
+                    @if (showPhaseUi && _lapsQualiFilter is int qf)
+                    {
+                        <span>@laps.Count rows for @_qualiPrefix@qf</span>
+                    }
+                    else
+                    {
+                        <span>@laps.Count rows</span>
+                    }
+                    <span> · </span>
+                    <span class="timing-purple">purple</span> = overall best ·
+                    <span class="timing-green">green</span> = personal best ·
+                    <span class="timing-yellow">yellow</span> = no improvement
+                </p>
+                @if (showPhaseUi)
+                {
+                    <div class="pace-metric" role="group" aria-label="Qualifying lap segment">
+                        <button type="button"
+                                class="pace-metric-btn @(_lapsQualiFilter is null ? "is-on" : null)"
+                                @onclick="() => SetLapsQualiFilter(null)">
+                            All Laps
+                        </button>
+                        @foreach (var phase in phaseOpts)
+                        {
+                            <button type="button"
+                                    class="pace-metric-btn @(_lapsQualiFilter == phase ? "is-on" : null)"
+                                    @onclick="() => SetLapsQualiFilter(phase)">
+                                @_qualiPrefix@phase
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            @if (_lapsDriverChips.Count > 0)
+            {
+                <DriverSelectionBar CssClass="mb-2"
+                                    Drivers="_lapsDriverChips"
+                                    Selected="_lapsSelectedDrivers"
+                                    SelectedChanged="OnLapsDriversSelected"
+                                    MinSelected="1" />
+            }
             <div class="ft-card results-wrap" style="max-height: 36rem;">
                 <table class="results-table">
                     <thead>
@@ -147,11 +283,43 @@ else
                         </tr>
                     </thead>
                     <tbody>
+                        @{
+                            int? prevPhase = null;
+                        }
                         @foreach (var lap in laps)
                         {
+                            if (showPhaseUi
+                                && _lapsQualiFilter is null
+                                && _lapsSort.Column == "lap"
+                                && lap.QualifyingPhase is int curPhase
+                                && prevPhase is int prev
+                                && curPhase != prev)
+                            {
+                                <tr class="quali-elim-row laps-phase-row">
+                                    <td colspan="7">
+                                        <div class="quali-elim-band @(curPhase >= 3 ? "is-q2" : "is-q1")">
+                                            <span class="quali-elim-line"></span>
+                                            <span class="quali-elim-label">
+                                                END OF @_qualiPrefix@prev / START OF @_qualiPrefix@curPhase
+                                            </span>
+                                            <span class="quali-elim-line"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+
+                            if (lap.QualifyingPhase is int pShown)
+                            {
+                                prevPhase = pShown;
+                            }
+
                             <tr>
-                                <td class="mono">
-                                    @lap.LapNumber
+                                <td class="mono lap-cell">
+                                    <span>@lap.LapNumber</span>
+                                    @if (showPhaseUi && lap.QualifyingPhase is int qp)
+                                    {
+                                        <span class="ft-badge ft-badge-lap-q ft-badge-lap-q@qp" title="@($"{_qualiPrefix}{qp}")">@_qualiPrefix@qp</span>
+                                    }
                                     @if (lap.IsPitOutLap == true)
                                     {
                                         <span class="ft-badge ft-badge-out" title="Pit out lap — incomplete timing">OUT</span>
@@ -194,7 +362,13 @@ else
                           Stints="_paceStints"
                           TeamByDriver="_paceTeams"
                           CircuitShortName="@_session?.CircuitShortName"
-                          Location="@_session?.Location" />
+                          Location="@_session?.Location"
+                          ShowQualifyingFilter="@_showQualiFilter"
+                          QualifyingSegmentPrefix="@_qualiPrefix"
+                          SessionName="@_session?.SessionName"
+                          SessionType="@_session?.SessionType"
+                          SessionResults="_results"
+                          StartingGridPositions="_startingGridPositions" />
         }
         else
         {
@@ -212,6 +386,16 @@ else
     private List<LapTimePointDto>? _pacePoints;
     private List<StintDto> _paceStints = [];
     private Dictionary<int, string>? _paceTeams;
+    private bool _showQualiFilter;
+    private string _qualiPrefix = "Q";
+    private List<int> _lapsQualiPhases = [];
+    /// <summary>null = All Laps; 1/2/3 = Q1/Q2/Q3 filter on Laps tab.</summary>
+    private int? _lapsQualiFilter;
+    private List<DriverChipOption> _lapsDriverChips = [];
+    private readonly HashSet<int> _lapsSelectedDrivers = new();
+    private Dictionary<int, int>? _startingGridPositions;
+    /// <summary>null = Classification (Overall); 0/1/2 = Q1/Q2/Q3 segment view.</summary>
+    private int? _qualiView;
     private bool _loading = true;
     private bool _lapsLoading;
     private string _tab = "results";
@@ -224,6 +408,12 @@ else
     private readonly TableSortState _resultsSort = new("pos");
     private readonly TableSortState _lapsSort = new("lap");
 
+    private sealed record ResultsRow(
+        SessionResultDto Result,
+        int? DisplayPos,
+        double? SegmentTime,
+        double? GapSeconds);
+
     protected override async Task OnParametersSetAsync()
     {
         if (SessionKey == _loadedKey && _session is not null) return;
@@ -235,6 +425,14 @@ else
         _pacePoints = null;
         _paceStints = [];
         _paceTeams = null;
+        _showQualiFilter = false;
+        _qualiPrefix = "Q";
+        _lapsQualiPhases = [];
+        _lapsQualiFilter = null;
+        _lapsDriverChips = [];
+        _lapsSelectedDrivers.Clear();
+        _startingGridPositions = null;
+        _qualiView = null;
         _segmentBests.Clear();
         _raceBest = null;
         _resultsSort.Reset("pos");
@@ -243,6 +441,10 @@ else
         {
             _session = await Api.GetSessionAsync(SessionKey);
             _results = _session is null ? null : await Api.GetResultsAsync(SessionKey);
+            var grid = _session is null ? null : await Api.GetStartingGridAsync(SessionKey);
+            _startingGridPositions = grid is { Count: > 0 }
+                ? grid.GroupBy(g => g.DriverNumber).ToDictionary(g => g.Key, g => g.First().Position)
+                : null;
             ComputeResultBests();
             _loadedKey = SessionKey;
         }
@@ -261,6 +463,55 @@ else
 
     private void SortLaps(string column) => _lapsSort.Toggle(column);
 
+    private void SetQualiView(int? segmentIndex)
+    {
+        if (_qualiView == segmentIndex) return;
+        _qualiView = segmentIndex;
+        // Default: ascending by segment time (Pos) / overall grid position.
+        _resultsSort.Reset("pos", ascending: true);
+    }
+
+    private IEnumerable<ResultsRow> BuildSegmentViewRows(int segmentIndex, int segments)
+    {
+        if (_results is null || segmentIndex < 0 || segmentIndex >= segments) return [];
+
+        var participants = _results
+            .Select(r => (Result: r, Time: ResultDisplay.SegmentAt(r.DurationJson, segmentIndex)))
+            .Where(x => x.Time is > 0)
+            .ToList();
+
+        if (participants.Count == 0) return [];
+
+        var best = participants.Min(x => x.Time!.Value);
+
+        // Rank by segment time first (stable classification for this segment).
+        var ranked = participants
+            .OrderBy(x => x.Time)
+            .ThenBy(x => x.Result.Position ?? int.MaxValue)
+            .Select((x, i) => new ResultsRow(
+                x.Result,
+                i + 1,
+                x.Time,
+                x.Time!.Value - best))
+            .ToList();
+
+        return _resultsSort.Column switch
+        {
+            "no" => _resultsSort.Apply(ranked, r => (IComparable?)r.Result.DriverNumber),
+            "driver" => _resultsSort.Apply(ranked, r => (IComparable?)(r.Result.DriverName ?? r.Result.NameAcronym ?? "")),
+            "gap" => _resultsSort.Apply(ranked, r => (IComparable?)r.GapSeconds),
+            "laps" => _resultsSort.Apply(ranked, r => (IComparable?)r.Result.NumberOfLaps),
+            "status" => _resultsSort.Apply(ranked, r => (IComparable?)StatusSortKey(r.Result, true, segments)),
+            var col when col.StartsWith("q", StringComparison.Ordinal) &&
+                         int.TryParse(col.AsSpan(1), out var qi) =>
+                _resultsSort.Apply(ranked, r => (IComparable?)ResultDisplay.SegmentAt(r.Result.DurationJson, qi)),
+            // Pos (default) keeps segment-time order; flipping asc/desc reverses it.
+            _ => _resultsSort.Ascending
+                ? ranked.OrderBy(r => r.DisplayPos)
+                : ranked.OrderByDescending(r => r.DisplayPos)
+        };
+    }
+
     private IEnumerable<SessionResultDto> SortedResults(bool segmented, int segments, SessionResultDto? pole)
     {
         if (_results is null) return [];
@@ -272,7 +523,7 @@ else
             "time" => _resultsSort.Apply(_results, r => (IComparable?)ResultDisplay.FinalSegmentTime(r.DurationJson)),
             "gap" => _resultsSort.Apply(_results, r => (IComparable?)GapSortKey(r, segmented, pole)),
             "laps" => _resultsSort.Apply(_results, r => (IComparable?)r.NumberOfLaps),
-            "status" => _resultsSort.Apply(_results, r => (IComparable?)StatusSortKey(r)),
+            "status" => _resultsSort.Apply(_results, r => (IComparable?)StatusSortKey(r, segmented, segments)),
             var col when col.StartsWith("q", StringComparison.Ordinal) &&
                          int.TryParse(col.AsSpan(1), out var qi) =>
                 _resultsSort.Apply(_results, r => (IComparable?)ResultDisplay.SegmentAt(r.DurationJson, qi)),
@@ -280,19 +531,124 @@ else
         };
     }
 
-    private IEnumerable<EvaluatedLap> SortedLaps()
+    private void SetLapsQualiFilter(int? phase)
+    {
+        if (_lapsQualiFilter == phase) return;
+        _lapsQualiFilter = phase;
+        _lapsSort.Reset("lap", ascending: true);
+        RebuildLapsDriverChips();
+    }
+
+    private void OnLapsDriversSelected(IReadOnlySet<int> next)
+    {
+        _lapsSelectedDrivers.Clear();
+        foreach (var n in next)
+        {
+            if (_lapsDriverChips.Any(d => d.Number == n))
+            {
+                _lapsSelectedDrivers.Add(n);
+            }
+        }
+
+        if (_lapsSelectedDrivers.Count == 0 && _lapsDriverChips.Count > 0)
+        {
+            _lapsSelectedDrivers.Add(_lapsDriverChips[0].Number);
+        }
+    }
+
+    private void RebuildLapsDriverChips()
+    {
+        if (_evaluatedLaps is null)
+        {
+            _lapsDriverChips = [];
+            _lapsSelectedDrivers.Clear();
+            return;
+        }
+
+        IEnumerable<EvaluatedLap> pool = _evaluatedLaps;
+        int? focusSeg = null;
+        if (_lapsQualiFilter is int phase)
+        {
+            pool = _evaluatedLaps.Where(l => l.QualifyingPhase == phase);
+            focusSeg = phase - 1;
+        }
+        var grouped = pool.GroupBy(l => l.DriverNumber).ToList();
+        var ordered = DriverOrder.OrderDriverNumbers(
+            grouped.Select(g => g.Key),
+            _results,
+            _session?.SessionName,
+            _session?.SessionType,
+            focusSeg,
+            _startingGridPositions);
+
+        var byNumber = grouped.ToDictionary(g => g.Key, g => g.First());
+        var teammateIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _lapsDriverChips = ordered
+            .Where(byNumber.ContainsKey)
+            .Select(number =>
+            {
+                var sample = byNumber[number];
+                var code = sample.NameAcronym ?? $"#{sample.DriverNumber}";
+                var team = sample.TeamName ?? "";
+                teammateIndex.TryGetValue(team, out var idx);
+                if (!string.IsNullOrWhiteSpace(team)) teammateIndex[team] = idx + 1;
+                var color = TeamColors.ForTeam(sample.TeamName, idx);
+                return new DriverChipOption(sample.DriverNumber, code, color);
+            })
+            .ToList();
+
+        _lapsSelectedDrivers.RemoveWhere(n => _lapsDriverChips.All(d => d.Number != n));
+        if (_lapsSelectedDrivers.Count == 0)
+        {
+            foreach (var d in _lapsDriverChips)
+            {
+                _lapsSelectedDrivers.Add(d.Number);
+            }
+        }
+    }
+
+    private IEnumerable<EvaluatedLap> FilteredLaps()
     {
         if (_evaluatedLaps is null) return [];
 
+        IEnumerable<EvaluatedLap> source = _evaluatedLaps;
+        if (_lapsQualiFilter is int phase)
+        {
+            source = source.Where(l => l.QualifyingPhase == phase);
+        }
+
+        if (_lapsSelectedDrivers.Count > 0 && _lapsDriverChips.Count > 0)
+        {
+            source = source.Where(l => _lapsSelectedDrivers.Contains(l.DriverNumber));
+        }
+
+        return source;
+    }
+
+    private IEnumerable<EvaluatedLap> SortedLaps()
+    {
+        var source = FilteredLaps();
+        if (!source.Any()) return [];
+
+        // In All Laps + QUALI, keep phases grouped so END/START banners can appear.
+        if (_showQualiFilter && _lapsQualiFilter is null && _lapsSort.Column == "lap")
+        {
+            var ordered = source
+                .OrderBy(l => l.QualifyingPhase ?? 99)
+                .ThenBy(l => l.LapNumber)
+                .ThenBy(l => l.DriverNumber);
+            return _lapsSort.Ascending ? ordered : ordered.Reverse();
+        }
+
         return _lapsSort.Column switch
         {
-            "driver" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.DisplayName),
-            "time" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.LapTime.Seconds),
-            "s1" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector1.Seconds),
-            "s2" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector2.Seconds),
-            "s3" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.Sector3.Seconds),
-            "st" => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.StSpeed),
-            _ => _lapsSort.Apply(_evaluatedLaps, l => (IComparable?)l.LapNumber)
+            "driver" => _lapsSort.Apply(source, l => (IComparable?)l.DisplayName),
+            "time" => _lapsSort.Apply(source, l => (IComparable?)l.LapTime.Seconds),
+            "s1" => _lapsSort.Apply(source, l => (IComparable?)l.Sector1.Seconds),
+            "s2" => _lapsSort.Apply(source, l => (IComparable?)l.Sector2.Seconds),
+            "s3" => _lapsSort.Apply(source, l => (IComparable?)l.Sector3.Seconds),
+            "st" => _lapsSort.Apply(source, l => (IComparable?)l.StSpeed),
+            _ => _lapsSort.Apply(source, l => (IComparable?)l.LapNumber)
         };
     }
 
@@ -328,11 +684,24 @@ else
         return myParts[decisive]!.Value - poleParts[decisive]!.Value;
     }
 
-    private static int StatusSortKey(SessionResultDto r)
+    private int StatusSortKey(SessionResultDto r, bool segmented, int segments)
     {
-        if (r.Dsq) return 3;
-        if (r.Dnf) return 2;
-        if (r.Dns) return 1;
+        if (r.Dsq) return 30;
+        if (r.Dnf) return 20;
+        if (r.Dns) return 10;
+
+        if (segmented)
+        {
+            var cutoffs = ResultDisplay.QualifyingCutoffs(_results ?? [], segments);
+            var st = ResultDisplay.QualifyingStatus(r, segments, _session?.SessionName, cutoffs);
+            if (st is { } s)
+            {
+                if (s.Label.EndsWith("3", StringComparison.Ordinal)) return 0;
+                if (s.Label.Contains("2 Eliminated", StringComparison.Ordinal)) return 1;
+                if (s.Label.Contains("1 Eliminated", StringComparison.Ordinal)) return 2;
+            }
+        }
+
         return 0;
     }
 
@@ -430,12 +799,40 @@ else
         {
             var raw = await Api.GetLapsAsync(SessionKey) ?? [];
             _paceStints = await Api.GetStintsAsync(SessionKey) ?? [];
+            var lapPositions = await Api.GetLapPositionsAsync(SessionKey) ?? [];
             _evaluatedLaps = LapTimingEvaluator.Evaluate(raw).ToList();
-            _pacePoints = MapPacePoints(raw, _paceStints);
+            _pacePoints = MapPacePoints(raw, _paceStints, lapPositions);
             _paceTeams = raw
                 .Where(l => !string.IsNullOrWhiteSpace(l.TeamName))
                 .GroupBy(l => l.DriverNumber)
                 .ToDictionary(g => g.Key, g => g.First().TeamName!);
+
+            _qualiPrefix = UiFormat.QualifyingSegmentPrefix(_session.SessionName);
+            _showQualiFilter = false;
+            _lapsQualiPhases = [];
+            _lapsQualiFilter = null;
+            if (UiFormat.IsQualifyingSession(_session.SessionName, _session.SessionType))
+            {
+                var phases = await Api.GetQualifyingPhasesAsync(SessionKey) ?? [];
+                if (phases.Count > 0)
+                {
+                    QualifyingLapAssigner.ApplyPhases(_pacePoints, raw, phases);
+                    QualifyingLapAssigner.ApplyPhases(_evaluatedLaps, phases);
+                    _lapsQualiPhases = phases
+                        .Select(p => p.Phase)
+                        .Where(p => p is >= 1 and <= 3)
+                        .Distinct()
+                        .OrderBy(p => p)
+                        .ToList();
+                    // Keep only phases that actually have laps.
+                    _lapsQualiPhases = _lapsQualiPhases
+                        .Where(p => _evaluatedLaps.Any(l => l.QualifyingPhase == p))
+                        .ToList();
+                    _showQualiFilter = _lapsQualiPhases.Count > 0;
+                }
+            }
+
+            RebuildLapsDriverChips();
         }
         catch (Exception ex)
         {
@@ -447,11 +844,18 @@ else
         }
     }
 
-    private static List<LapTimePointDto> MapPacePoints(IEnumerable<LapDto> laps, IReadOnlyList<StintDto> stints)
+    private static List<LapTimePointDto> MapPacePoints(
+        IEnumerable<LapDto> laps,
+        IReadOnlyList<StintDto> stints,
+        IReadOnlyList<LapPositionDto> lapPositions)
     {
         var byDriver = stints
             .GroupBy(s => s.DriverNumber)
             .ToDictionary(g => g.Key, g => g.OrderBy(s => s.StintNumber).ToList());
+
+        var posByKey = lapPositions
+            .GroupBy(p => (p.DriverNumber, p.LapNumber))
+            .ToDictionary(g => g.Key, g => g.First().Position);
 
         return laps
             .Select(l =>
@@ -470,6 +874,8 @@ else
                     tyreAge = (stint.TyreAgeAtStart ?? 0) + (l.LapNumber - start);
                 }
 
+                posByKey.TryGetValue((l.DriverNumber, l.LapNumber), out var position);
+
                 return new LapTimePointDto
                 {
                     LapNumber = l.LapNumber,
@@ -479,18 +885,22 @@ else
                     Sector3Seconds = l.DurationSector3 is > 0 ? l.DurationSector3.Value : 0,
                     TopSpeedKmh = l.StSpeed is > 0 ? l.StSpeed.Value : 0,
                     DriverCode = l.NameAcronym,
+                    DriverName = l.DriverName,
                     DriverNumber = l.DriverNumber,
                     Compound = stint?.Compound,
                     TyreAge = tyreAge,
                     StintNumber = stint?.StintNumber,
-                    IsPitLap = l.IsPitOutLap == true
+                    IsPitLap = l.IsPitOutLap == true,
+                    Position = position > 0 ? position : null,
+                    DateStart = l.DateStart
                 };
             })
             .Where(p => p.LapTimeSeconds > 0
                         || p.Sector1Seconds > 0
                         || p.Sector2Seconds > 0
                         || p.Sector3Seconds > 0
-                        || p.TopSpeedKmh > 0)
+                        || p.TopSpeedKmh > 0
+                        || p.Position is > 0)
             .OrderBy(p => p.DriverNumber)
             .ThenBy(p => p.LapNumber)
             .ToList();

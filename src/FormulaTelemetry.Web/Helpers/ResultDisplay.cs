@@ -158,6 +158,67 @@ public static class ResultDisplay
         return $"{prefix}{index + 1}";
     }
 
+    public static string SegmentPrefix(string? sessionName)
+    {
+        var n = (sessionName ?? "").ToLowerInvariant();
+        return n.Contains("sprint") && (n.Contains("qual") || n.Contains("shootout")) ? "SQ" : "Q";
+    }
+
+    /// <summary>
+    /// Classic F1 cutoffs: last position that progressed to Q3 / Q2.
+    /// Returns (q3Cutoff, q2Cutoff) e.g. (10, 15) → dividers after those rows.
+    /// </summary>
+    public static (int Q3Cutoff, int Q2Cutoff)? QualifyingCutoffs(
+        IReadOnlyList<SessionResultDto> results,
+        int segments)
+    {
+        if (segments < 3 || results.Count == 0) return null;
+
+        var reachedQ3 = results.Count(r => SegmentAt(r.DurationJson, 2) is > 0);
+        var reachedQ2 = results.Count(r => SegmentAt(r.DurationJson, 1) is > 0);
+
+        if (reachedQ3 is >= 8 and <= 12 && reachedQ2 > reachedQ3)
+        {
+            return (reachedQ3, reachedQ2);
+        }
+
+        // Standard 20-car weekend fallback.
+        if (results.Count >= 16)
+        {
+            return (10, 15);
+        }
+
+        if (reachedQ3 >= 1 && reachedQ2 > reachedQ3)
+        {
+            return (reachedQ3, reachedQ2);
+        }
+
+        return null;
+    }
+
+    /// <summary>Status chip for segmented quali (DNF/DNS/DSQ take priority).</summary>
+    public static (string Label, string Css)? QualifyingStatus(
+        SessionResultDto r,
+        int segments,
+        string? sessionName,
+        (int Q3Cutoff, int Q2Cutoff)? cutoffs)
+    {
+        if (r.Dsq) return ("DSQ", "ft-badge ft-badge-dsq");
+        if (r.Dnf) return ("DNF", "ft-badge ft-badge-dnf");
+        if (r.Dns) return ("DNS", "ft-badge ft-badge-dns");
+        if (segments < 3 || cutoffs is null || r.Position is not int pos) return null;
+
+        var prefix = SegmentPrefix(sessionName);
+        var (q3, q2) = cutoffs.Value;
+
+        if (pos <= q3) return ($"{prefix}3", "ft-badge ft-badge-q3");
+        if (pos <= q2) return ($"{prefix}2 Eliminated", "ft-badge ft-badge-q2-out");
+        return ($"{prefix}1 Eliminated", "ft-badge ft-badge-q1-out");
+    }
+
+    public static bool ReachedSegment(string? durationJson, int segmentIndex) =>
+        SegmentAt(durationJson, segmentIndex) is > 0;
+
     private static List<double?> ParseParts(JsonElement el)
     {
         switch (el.ValueKind)

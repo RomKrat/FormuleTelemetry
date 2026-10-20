@@ -35,4 +35,13 @@ public sealed class TelemetryApiClient
 
     public Task<List<StintDto>?> GetStintsAsync(int sessionKey, CancellationToken cancellationToken = default) =>
         _http.GetFromJsonAsync<List<StintDto>>($"api/sessions/{sessionKey}/stints", cancellationToken);
+
+    public Task<List<QualifyingPhaseDto>?> GetQualifyingPhasesAsync(int sessionKey, CancellationToken cancellationToken = default) =>
+        _http.GetFromJsonAsync<List<QualifyingPhaseDto>>($"api/sessions/{sessionKey}/qualifying-phases", cancellationToken);
+
+    public Task<List<StartingGridEntryDto>?> GetStartingGridAsync(int sessionKey, CancellationToken cancellationToken = default) =>
+        _http.GetFromJsonAsync<List<StartingGridEntryDto>>($"api/sessions/{sessionKey}/starting-grid", cancellationToken);
+
+    public Task<List<LapPositionDto>?> GetLapPositionsAsync(int sessionKey, CancellationToken cancellationToken = default) =>
+        _http.GetFromJsonAsync<List<LapPositionDto>>($"api/sessions/{sessionKey}/lap-positions", cancellationToken);
 }

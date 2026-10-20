@@ -25,6 +25,23 @@ public static class UiFormat
         return SessionBadge(sessionName, sessionType).ToUpperInvariant();
     }
 
+    /// <summary>True for Qualifying and Sprint Qualifying / Shootout sessions.</summary>
+    public static bool IsQualifyingSession(string? sessionName, string? sessionType = null)
+    {
+        var n = (sessionName ?? "").ToLowerInvariant();
+        if (n.Contains("sprint") && (n.Contains("qual") || n.Contains("shootout"))) return true;
+        if (n.Contains("qualifying") || n == "q") return true;
+        var t = (sessionType ?? "").ToLowerInvariant();
+        return t.Contains("qualifying");
+    }
+
+    /// <summary>Segment label prefix: "Q" or "SQ".</summary>
+    public static string QualifyingSegmentPrefix(string? sessionName)
+    {
+        var n = (sessionName ?? "").ToLowerInvariant();
+        return n.Contains("sprint") && (n.Contains("qual") || n.Contains("shootout")) ? "SQ" : "Q";
+    }
+
     public static string SessionBadge(string sessionName, string sessionType)
     {
         var n = (sessionName ?? "").ToLowerInvariant();

@@ -21,4 +21,10 @@ public interface ITelemetryReadStore
     Task<IReadOnlyList<LapDto>> GetLapsAsync(int sessionKey, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<StintDto>> GetStintsAsync(int sessionKey, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<QualifyingPhaseDto>> GetQualifyingPhasesAsync(int sessionKey, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<StartingGridEntryDto>> GetStartingGridAsync(int sessionKey, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LapPositionDto>> GetLapPositionsAsync(int sessionKey, CancellationToken cancellationToken = default);
 }

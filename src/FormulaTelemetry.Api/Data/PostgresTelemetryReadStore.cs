@@ -252,6 +252,130 @@ public sealed class PostgresTelemetryReadStore : ITelemetryReadStore
         return list;
     }
 
+    public async Task<IReadOnlyList<LapPositionDto>> GetLapPositionsAsync(
+        int sessionKey,
+        CancellationToken cancellationToken = default)
+    {
+        // Last OpenF1 position sample at or before each lap end → discrete P1…Pn history.
+        const string sql = """
+            WITH lap_ends AS (
+                SELECT driver_number,
+                       lap_number,
+                       date_start + make_interval(secs => COALESCE(lap_duration, 0)) AS lap_end
+                FROM laps
+                WHERE session_key = @session_key
+                  AND date_start IS NOT NULL
+            )
+            SELECT DISTINCT ON (l.driver_number, l.lap_number)
+                   l.driver_number, l.lap_number, p.position
+            FROM lap_ends l
+            INNER JOIN positions p
+              ON p.session_key = @session_key
+             AND p.driver_number = l.driver_number
+             AND p.date <= l.lap_end
+            ORDER BY l.driver_number, l.lap_number, p.date DESC
+            """;
+
+        await using var conn = await OpenAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("session_key", sessionKey);
+
+        var list = new List<LapPositionDto>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            list.Add(new LapPositionDto(
+                reader.GetInt32(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2)));
+        }
+
+        return list;
+    }
+
+    public async Task<IReadOnlyList<StartingGridEntryDto>> GetStartingGridAsync(
+        int sessionKey,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT session_key, driver_number, meeting_key, position, lap_duration
+            FROM starting_grid_entries
+            WHERE session_key = @session_key
+            ORDER BY position, driver_number
+            """;
+
+        await using var conn = await OpenAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("session_key", sessionKey);
+
+        var list = new List<StartingGridEntryDto>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            list.Add(new StartingGridEntryDto(
+                reader.GetInt32(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : reader.GetDouble(4)));
+        }
+
+        return list;
+    }
+
+    public async Task<IReadOnlyList<QualifyingPhaseDto>> GetQualifyingPhasesAsync(
+        int sessionKey,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT qualifying_phase, date, category, flag, message
+            FROM race_control_messages
+            WHERE session_key = @session_key
+              AND qualifying_phase IS NOT NULL
+            ORDER BY date
+            """;
+
+        await using var conn = await OpenAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("session_key", sessionKey);
+
+        var starts = new Dictionary<int, DateTimeOffset>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var phase = reader.GetInt32(0);
+            if (phase is < 1 or > 3 || starts.ContainsKey(phase)) continue;
+
+            var date = reader.GetFieldValue<DateTimeOffset>(1);
+            var category = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var flag = reader.IsDBNull(3) ? null : reader.GetString(3);
+            var message = reader.IsDBNull(4) ? null : reader.GetString(4);
+
+            if (!IsQualifyingPhaseStart(category, flag, message)) continue;
+            starts[phase] = date;
+        }
+
+        return starts
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new QualifyingPhaseDto(kv.Key, kv.Value))
+            .ToList();
+    }
+
+    private static bool IsQualifyingPhaseStart(string? category, string? flag, string? message)
+    {
+        var cat = category ?? "";
+        var msg = (message ?? "").ToUpperInvariant();
+        if (cat.Equals("SessionStatus", StringComparison.OrdinalIgnoreCase)
+            && msg.Contains("STARTED", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var fl = flag ?? "";
+        return fl.Equals("GREEN", StringComparison.OrdinalIgnoreCase)
+               && msg.Contains("PIT EXIT", StringComparison.Ordinal);
+    }
+
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var conn = new NpgsqlConnection(_connectionString);

@@ -76,11 +76,18 @@ public sealed class LapTimePointDto
     /// <summary>Speed trap (ST) in km/h when available.</summary>
     public double TopSpeedKmh { get; set; }
     public string? DriverCode { get; set; }
+    public string? DriverName { get; set; }
     public int DriverNumber { get; set; }
     public string? Compound { get; set; }
     public int? TyreAge { get; set; }
     public int? StintNumber { get; set; }
     public bool IsPitLap { get; set; }
+    /// <summary>1/2/3 for Q1/Q2/Q3 when session is qualifying; otherwise null.</summary>
+    public int? QualifyingPhase { get; set; }
+    /// <summary>Running race/session position at end of this lap (P1 = 1), when available.</summary>
+    public int? Position { get; set; }
+    /// <summary>UTC start of this lap (OpenF1 date_start), when available.</summary>
+    public DateTimeOffset? DateStart { get; set; }
 }
 
 /// <summary>OpenF1 tyre stint for a driver in a session.</summary>
@@ -94,4 +101,27 @@ public sealed class StintDto
     public int? LapEnd { get; set; }
     public string? Compound { get; set; }
     public int? TyreAgeAtStart { get; set; }
+}
+
+/// <summary>Start of a qualifying segment from race control (phase 1–3).</summary>
+public sealed class QualifyingPhaseDto
+{
+    public int Phase { get; set; }
+    public DateTimeOffset Start { get; set; }
+}
+
+public sealed class StartingGridEntryDto
+{
+    public int SessionKey { get; set; }
+    public int DriverNumber { get; set; }
+    public int MeetingKey { get; set; }
+    public int Position { get; set; }
+    public double? LapDuration { get; set; }
+}
+
+public sealed class LapPositionDto
+{
+    public int DriverNumber { get; set; }
+    public int LapNumber { get; set; }
+    public int Position { get; set; }
 }
