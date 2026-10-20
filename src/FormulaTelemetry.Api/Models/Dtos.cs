@@ -56,3 +56,13 @@ public sealed record LapDto(
     string? DriverName,
     string? TeamName,
     string? NameAcronym);
+
+public sealed record StintDto(
+    int SessionKey,
+    int DriverNumber,
+    int StintNumber,
+    int MeetingKey,
+    int? LapStart,
+    int? LapEnd,
+    string? Compound,
+    int? TyreAgeAtStart);

@@ -32,4 +32,7 @@ public sealed class TelemetryApiClient
 
     public Task<List<LapDto>?> GetLapsAsync(int sessionKey, CancellationToken cancellationToken = default) =>
         _http.GetFromJsonAsync<List<LapDto>>($"api/sessions/{sessionKey}/laps", cancellationToken);
+
+    public Task<List<StintDto>?> GetStintsAsync(int sessionKey, CancellationToken cancellationToken = default) =>
+        _http.GetFromJsonAsync<List<StintDto>>($"api/sessions/{sessionKey}/stints", cancellationToken);
 }

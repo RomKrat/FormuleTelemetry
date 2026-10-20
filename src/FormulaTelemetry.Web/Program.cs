@@ -1,7 +1,13 @@
+using System.Globalization;
 using FormulaTelemetry.Web;
 using FormulaTelemetry.Web.Services;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+
+// English-only UI: ignore browser/OS locale for dates and numbers.
+var uiCulture = CultureInfo.GetCultureInfo("en-US");
+CultureInfo.DefaultThreadCurrentCulture = uiCulture;
+CultureInfo.DefaultThreadCurrentUICulture = uiCulture;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");

@@ -94,29 +94,30 @@ public static class UiFormat
     {
         if (dateStart is null) return "—";
 
+        var culture = CultureInfo.InvariantCulture;
         var start = dateStart.Value.UtcDateTime.Date;
         if (dateEnd is null)
         {
-            return start.ToString("dd MMM yyyy");
+            return start.ToString("dd MMM yyyy", culture);
         }
 
         var end = dateEnd.Value.UtcDateTime.Date;
         if (end <= start)
         {
-            return start.ToString("dd MMM yyyy");
+            return start.ToString("dd MMM yyyy", culture);
         }
 
         if (start.Year == end.Year && start.Month == end.Month)
         {
-            return $"{start:dd}–{end:dd MMM yyyy}";
+            return $"{start.ToString("dd", culture)}–{end.ToString("dd MMM yyyy", culture)}";
         }
 
         if (start.Year == end.Year)
         {
-            return $"{start:dd MMM} – {end:dd MMM yyyy}";
+            return $"{start.ToString("dd MMM", culture)} – {end.ToString("dd MMM yyyy", culture)}";
         }
 
-        return $"{start:dd MMM yyyy} – {end:dd MMM yyyy}";
+        return $"{start.ToString("dd MMM yyyy", culture)} – {end.ToString("dd MMM yyyy", culture)}";
     }
 
     public static string FormatLapTime(double? seconds) =>

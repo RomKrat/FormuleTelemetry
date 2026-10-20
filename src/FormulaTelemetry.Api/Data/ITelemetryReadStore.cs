@@ -19,4 +19,6 @@ public interface ITelemetryReadStore
     Task<IReadOnlyList<SessionResultDto>> GetSessionResultsAsync(int sessionKey, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<LapDto>> GetLapsAsync(int sessionKey, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<StintDto>> GetStintsAsync(int sessionKey, CancellationToken cancellationToken = default);
 }

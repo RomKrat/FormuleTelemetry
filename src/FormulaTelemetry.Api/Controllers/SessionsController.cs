@@ -46,4 +46,17 @@ public sealed class SessionsController : ControllerBase
         var laps = await _store.GetLapsAsync(sessionKey, cancellationToken);
         return Ok(laps);
     }
+
+    [HttpGet("{sessionKey:int}/stints")]
+    public async Task<IActionResult> GetStints(int sessionKey, CancellationToken cancellationToken)
+    {
+        var session = await _store.GetSessionAsync(sessionKey, cancellationToken);
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var stints = await _store.GetStintsAsync(sessionKey, cancellationToken);
+        return Ok(stints);
+    }
 }

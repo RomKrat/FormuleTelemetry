@@ -274,6 +274,140 @@ a:hover { color: var(--accent); text-decoration: underline; }
 
 /* Race Pace chart */
 .pace-chart { padding: 1rem 1.1rem 1.15rem; }
+.pace-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+    gap: 0.85rem;
+    align-items: start;
+}
+@media (max-width: 900px) {
+    .pace-layout {
+        grid-template-columns: 1fr;
+    }
+}
+.pace-track-aside {
+    position: sticky;
+    top: 0.5rem;
+}
+.track-map {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    padding: 0.65rem 0.7rem 0.55rem;
+}
+.track-map-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+.track-map-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text);
+}
+.track-map-meta {
+    font-size: 0.68rem;
+    color: var(--muted);
+}
+.track-map-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    aspect-ratio: 1;
+}
+.track-outline {
+    stroke: color-mix(in srgb, var(--border) 70%, transparent);
+    stroke-width: 2.8;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+.track-sector {
+    stroke-width: 1.7;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+.track-sector.s1 { stroke: #64C4FF; }
+.track-sector.s2 { stroke: #F0C419; }
+.track-sector.s3 { stroke: #2BBF6A; }
+.track-sector.is-hot {
+    stroke-width: 2.6;
+    opacity: 1;
+}
+.track-sector.is-cold {
+    opacity: 0.16;
+    stroke-width: 1.2;
+}
+.track-car {
+    transition: cx 0.05s linear, cy 0.05s linear;
+}
+.track-car-glow {
+    transition: cx 0.05s linear, cy 0.05s linear;
+}
+.track-turn-dot {
+    fill: var(--surface);
+    stroke: var(--muted);
+    stroke-width: 0.4;
+}
+.track-turn-label {
+    fill: var(--muted);
+    font-size: 2.4px;
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-weight: 600;
+    pointer-events: none;
+}
+.track-sf {
+    fill: var(--text);
+    opacity: 0.85;
+}
+.track-car-glow {
+    fill: var(--accent);
+    opacity: 0.35;
+    pointer-events: none;
+}
+.track-car {
+    fill: var(--accent);
+    stroke: var(--surface);
+    stroke-width: 0.5;
+    pointer-events: none;
+}
+.track-map-legend {
+    display: flex;
+    gap: 0.55rem;
+    margin-top: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+.track-map-legend .seg.s1 { color: #64C4FF; }
+.track-map-legend .seg.s2 { color: #F0C419; }
+.track-map-legend .seg.s3 { color: #2BBF6A; }
+.pace-metric {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.15rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.pace-metric-btn {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.pace-metric-btn:hover { color: var(--text); }
+.pace-metric-btn.is-on {
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .pace-toggle {
     display: inline-flex;
     align-items: center;
@@ -300,6 +434,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
 .pace-drivers {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.4rem;
 }
 .pace-driver-chip {
@@ -315,6 +450,11 @@ a:hover { color: var(--accent); text-decoration: underline; }
     font-weight: 600;
     cursor: pointer;
     user-select: none;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease,
+        border-color 0.12s ease,
+        box-shadow 0.12s ease;
 }
 .pace-driver-chip input { display: none; }
 .pace-driver-chip .swatch {
@@ -322,18 +462,70 @@ a:hover { color: var(--accent); text-decoration: underline; }
     height: 0.55rem;
     border-radius: 50%;
     background: var(--chip, var(--muted));
+    flex-shrink: 0;
+}
+.pace-driver-chip .code {
+    line-height: 1;
+}
+.pace-driver-chip:not(.is-on) {
+    opacity: 0.55;
+}
+.pace-driver-chip:not(.is-on):hover {
+    opacity: 0.85;
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--chip, var(--border)) 40%, var(--border));
 }
 .pace-driver-chip.is-on {
+    opacity: 1;
     color: var(--text);
     border-color: color-mix(in srgb, var(--chip, var(--accent)) 55%, var(--border));
     background: color-mix(in srgb, var(--chip, var(--accent)) 14%, transparent);
 }
-.pace-svg-wrap { position: relative; }
+/* Hover on chart line → highlight matching legend pill */
+.pace-driver-chip.is-focus {
+    opacity: 1;
+    color: var(--text);
+    border-color: var(--chip, var(--accent));
+    background: color-mix(in srgb, var(--chip, var(--accent)) 32%, var(--surface-2));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--chip, var(--accent)) 35%, transparent);
+}
+.pace-driver-chip.is-on.is-focus {
+    background: color-mix(in srgb, var(--chip, var(--accent)) 38%, var(--surface-2));
+    border-color: var(--chip, var(--accent));
+}
+.pace-lap-range { gap: 0.3rem; }
+.pace-svg-wrap { position: relative; user-select: none; }
+.pace-svg-wrap.is-zooming { cursor: col-resize; }
 .pace-svg {
     width: 100%;
     height: auto;
     display: block;
     background: transparent;
+}
+.pace-reset-zoom {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    z-index: 3;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    color: var(--text);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.28rem 0.55rem;
+    cursor: pointer;
+}
+.pace-reset-zoom:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--accent);
+}
+.pace-zoom-box {
+    fill: color-mix(in srgb, var(--accent) 18%, transparent);
+    stroke: var(--accent);
+    stroke-width: 1.25;
+    stroke-dasharray: 4 3;
+    pointer-events: none;
 }
 .pace-plot-bg {
     fill: var(--surface-2);
@@ -355,6 +547,38 @@ a:hover { color: var(--accent); text-decoration: underline; }
     font-size: 11px;
     font-family: "IBM Plex Sans", system-ui, sans-serif;
 }
+.pace-series {
+    transition: opacity 0.12s ease;
+}
+.pace-series .pace-line {
+    transition: stroke-width 0.12s ease;
+}
+.pace-series-hit { cursor: pointer; }
+.pace-svg-wrap.is-crosshair { cursor: crosshair; }
+.pace-crosshair {
+    stroke: var(--accent);
+    stroke-width: 1.25;
+    stroke-dasharray: 4 3;
+    pointer-events: none;
+}
+.pace-crosshair-dot {
+    pointer-events: none;
+    stroke: var(--surface);
+    stroke-width: 1.5;
+}
+.pace-axis-readout {
+    pointer-events: none;
+}
+.pace-axis-readout-bg {
+    fill: var(--accent);
+    opacity: 0.92;
+}
+.pace-axis-readout-text {
+    fill: #0b0d10;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
 .pace-dot { cursor: crosshair; }
 .pace-tip {
     position: absolute;
@@ -371,8 +595,65 @@ a:hover { color: var(--accent); text-decoration: underline; }
     font-size: 0.78rem;
     pointer-events: none;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    z-index: 2;
 }
 .pace-tip strong { color: var(--accent); }
+.pace-tip-multi {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.28rem;
+    min-width: 11.5rem;
+    max-width: 16rem;
+}
+.pace-tip-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.15rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+.pace-tip-row {
+    display: grid;
+    grid-template-columns: 0.55rem 2.4rem 1fr auto;
+    align-items: center;
+    gap: 0.4rem;
+    transition: opacity 0.12s ease;
+}
+.pace-tip-row.is-dim { opacity: 0.35; }
+.pace-tip-row .swatch {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--chip, var(--muted));
+}
+.pace-tip-row .code { font-weight: 600; }
+.pace-tip-row .val { text-align: right; }
+.pace-tip-row .gap { color: var(--muted); min-width: 2.6rem; text-align: right; }
+.pace-tip-stint {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    max-width: 22rem;
+}
+.pace-tip-stint-line {
+    font-size: 0.7rem;
+    color: var(--muted);
+    padding-left: 1.35rem;
+    margin-top: -0.1rem;
+    margin-bottom: 0.15rem;
+}
+.pace-tip-stint-line.is-dim { opacity: 0.35; }
+.pace-stint-label {
+    fill: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.pace-stint-seg { cursor: pointer; }
+.pace-stint-row { transition: opacity 0.12s ease; }
 
 /* Badges */
 .ft-badge {

@@ -1,0 +1,181 @@
+@using System.Globalization
+@using System.Net.Http.Json
+@using FormulaTelemetry.Web.Helpers
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="track-map" aria-label="@(_layout.Name) track map">
+    <div class="track-map-head">
+        <span class="track-map-title">@_layout.Name</span>
+        @if (ActiveLap is int lap)
+        {
+            <span class="track-map-meta mono">Lap @lap</span>
+        }
+        else if (_loadError is not null)
+        {
+            <span class="track-map-meta">@_loadError</span>
+        }
+        else if (!_ready)
+        {
+            <span class="track-map-meta">Loading layout…</span>
+        }
+        else
+        {
+            <span class="track-map-meta">Track map</span>
+        }
+    </div>
+
+    <svg class="track-map-svg" viewBox="0 0 100 100" role="img">
+        <path d="@FullPathD" fill="none" class="track-outline" />
+
+        <path d="@S1PathD" fill="none"
+              class="track-sector s1 @(HighlightSector == 1 ? "is-hot" : HighlightSector is > 0 ? "is-cold" : null)" />
+        <path d="@S2PathD" fill="none"
+              class="track-sector s2 @(HighlightSector == 2 ? "is-hot" : HighlightSector is > 0 ? "is-cold" : null)" />
+        <path d="@S3PathD" fill="none"
+              class="track-sector s3 @(HighlightSector == 3 ? "is-hot" : HighlightSector is > 0 ? "is-cold" : null)" />
+
+        @foreach (var turn in _layout.Turns)
+        {
+            var pt = TrackLayouts.PointAt(_layout, turn.Progress);
+            <g class="track-turn">
+                <circle cx="@F(pt.X)" cy="@F(pt.Y)" r="1.2" class="track-turn-dot" />
+                <text x="@F(pt.X)" y="@F(pt.Y - 2.2)" text-anchor="middle" class="track-turn-label">@turn.Label</text>
+            </g>
+        }
+
+        @{
+            var sf = TrackLayouts.PointAt(_layout, 0);
+        }
+        <rect x="@(sf.X - 1.1)" y="@(sf.Y - 1.1)" width="2.2" height="2.2" class="track-sf"
+              transform="rotate(45 @F(sf.X) @F(sf.Y))" />
+
+        @if (ShowMarker)
+        {
+            <circle cx="@F(_marker.X)" cy="@F(_marker.Y)" r="2.6" class="track-car-glow" />
+            <circle cx="@F(_marker.X)" cy="@F(_marker.Y)" r="1.7" class="track-car" />
+        }
+    </svg>
+
+    <div class="track-map-legend">
+        <span class="seg s1">S1</span>
+        <span class="seg s2">S2</span>
+        <span class="seg s3">S3</span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? CircuitShortName { get; set; }
+    [Parameter] public string? Location { get; set; }
+    [Parameter] public double Progress { get; set; }
+    [Parameter] public int HighlightSector { get; set; }
+    [Parameter] public bool ShowMarker { get; set; }
+    [Parameter] public int? ActiveLap { get; set; }
+
+    private static readonly SemaphoreSlim LoadLock = new(1, 1);
+    private static Task? _loadTask;
+
+    private HttpClient? _staticHttp;
+    private bool _ready;
+    private string? _loadError;
+    private TrackLayouts.Layout _layout = TrackLayouts.Resolve(null);
+    private (double X, double Y) _marker;
+    private string FullPathD = "";
+    private string S1PathD = "";
+    private string S2PathD = "";
+    private string S3PathD = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await EnsureLayoutsLoadedAsync();
+        RebuildGeometry();
+    }
+
+    protected override void OnParametersSet() => RebuildGeometry();
+
+    private async Task EnsureLayoutsLoadedAsync()
+    {
+        if (TrackLayouts.IsLoaded)
+        {
+            _ready = true;
+            return;
+        }
+
+        await LoadLock.WaitAsync();
+        try
+        {
+            if (TrackLayouts.IsLoaded)
+            {
+                _ready = true;
+                return;
+            }
+
+            _loadTask ??= LoadAsync();
+            await _loadTask;
+            _ready = TrackLayouts.IsLoaded;
+        }
+        catch (Exception ex)
+        {
+            _loadError = "Layout unavailable";
+            Console.WriteLine($"Track layout load failed: {ex.Message}");
+        }
+        finally
+        {
+            LoadLock.Release();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _staticHttp ??= new HttpClient { BaseAddress = new Uri(Nav.BaseUri) };
+        var dto = await _staticHttp.GetFromJsonAsync<TrackLayoutFileDto>("data/track-layouts.json");
+        TrackLayouts.LoadFromDto(dto);
+    }
+
+    private void RebuildGeometry()
+    {
+        _layout = TrackLayouts.Resolve(CircuitShortName, Location);
+        FullPathD = ToPath(_layout.Points, close: true);
+        S1PathD = ToPath(TrackLayouts.SectorSlice(_layout, 1));
+        S2PathD = ToPath(TrackLayouts.SectorSlice(_layout, 2));
+        S3PathD = ToPath(TrackLayouts.SectorSlice(_layout, 3));
+
+        var t = Math.Clamp(Progress, 0, 1);
+        if (HighlightSector is >= 1 and <= 3)
+        {
+            var a = HighlightSector switch
+            {
+                1 => 0,
+                2 => _layout.Sector1End,
+                _ => _layout.Sector2End
+            };
+            var b = HighlightSector switch
+            {
+                1 => _layout.Sector1End,
+                2 => _layout.Sector2End,
+                _ => 1.0
+            };
+            t = a + (b - a) * t;
+        }
+
+        _marker = TrackLayouts.PointAt(_layout, t);
+    }
+
+    private static string ToPath(IReadOnlyList<(double X, double Y)> pts, bool close = false)
+    {
+        if (pts.Count == 0) return "";
+        var sb = new System.Text.StringBuilder(pts.Count * 12);
+        sb.Append('M').Append(F(pts[0].X)).Append(' ').Append(F(pts[0].Y));
+        for (var i = 1; i < pts.Count; i++)
+        {
+            sb.Append('L').Append(F(pts[i].X)).Append(' ').Append(F(pts[i].Y));
+        }
+
+        if (close) sb.Append('Z');
+        return sb.ToString();
+    }
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    public void Dispose() => _staticHttp?.Dispose();
+}

@@ -1,25 +1,87 @@
 @using System.Globalization
+@inject IJSRuntime Js
 
 <div class="pace-chart ft-card">
     <div class="pace-toolbar d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="pace-metric" role="group" aria-label="Chart metric">
+            @foreach (var opt in ChartMetricOptions)
+            {
+                <button type="button"
+                        class="pace-metric-btn @(_chartMetric == opt.Value ? "is-on" : null)"
+                        @onclick="() => SetChartMetric(opt.Value)">
+                    @opt.Label
+                </button>
+            }
+        </div>
+
+        @if (_chartMetric == ChartMetric.LapTime)
+        {
+            <div class="pace-metric" role="group" aria-label="Lap / sector split">
+                @foreach (var opt in SplitOptions)
+                {
+                    <button type="button"
+                            class="pace-metric-btn @(_split == opt.Value ? "is-on" : null)"
+                            @onclick="() => SetSplit(opt.Value)">
+                        @opt.Label
+                    </button>
+                }
+            </div>
+        }
+
         <label class="pace-toggle mb-0">
             <input type="checkbox" @bind="_hidePitLaps" @bind:after="OnFilterChanged" />
-            Skrýt kola s Pit Stopem
+            Hide Pit Stop Laps
         </label>
         <label class="pace-toggle mb-0">
             <input type="checkbox" @bind="_clipOutliers" @bind:after="OnFilterChanged" />
-            Oříznout odlehlé časy
+            Filter Outliers
         </label>
         @if (_clipOutliers)
         {
-            <label class="pace-max mb-0">
-                Max
-                <input class="form-control pace-max-input" type="number" step="1" min="60" max="300"
-                       @bind="_maxLapSeconds" @bind:event="onchange" @bind:after="OnFilterChanged" />
-                <span class="text-muted mono">(@FormatAxisTime(_maxLapSeconds))</span>
-            </label>
+            @if (_chartMetric == ChartMetric.TopSpeed)
+            {
+                <label class="pace-max mb-0">
+                    Min
+                    <input class="form-control pace-max-input" type="number" step="5" min="100" max="350"
+                           @bind="_outlierLimit" @bind:event="onchange" @bind:after="OnFilterChanged" />
+                    <span class="text-muted mono">km/h</span>
+                </label>
+            }
+            else if (_isGapMetric)
+            {
+                <label class="pace-max mb-0">
+                    Max gap
+                    <input class="form-control pace-max-input" type="number" step="1" min="5" max="300"
+                           @bind="_outlierLimit" @bind:event="onchange" @bind:after="OnFilterChanged" />
+                    <span class="text-muted mono">s</span>
+                </label>
+            }
+            else
+            {
+                <label class="pace-max mb-0">
+                    Max
+                    <input class="form-control pace-max-input" type="number"
+                           step="@(_split == PaceSplit.FullLap ? 1 : 0.5)"
+                           min="@(_split == PaceSplit.FullLap ? 60 : 15)"
+                           max="@(_split == PaceSplit.FullLap ? 300 : 120)"
+                           @bind="_outlierLimit" @bind:event="onchange" @bind:after="OnFilterChanged" />
+                    <span class="text-muted mono">(@FormatAxisValue(_outlierLimit))</span>
+                </label>
+            }
         }
-        <span class="text-muted mono" style="font-size: 0.75rem;">Y = lap time (faster up)</span>
+        <label class="pace-toggle mb-0">
+            <input type="checkbox" @bind="_crosshair" @bind:after="OnCrosshairToggled" />
+            Crosshair
+        </label>
+        <label class="pace-max mb-0 pace-lap-range">
+            Laps: From
+            <input class="form-control pace-max-input" type="number" min="@_dataLapMin" max="@_dataLapMax"
+                   @bind="_lapFrom" @bind:event="onchange" @bind:after="OnLapRangeInput" />
+            To
+            <input class="form-control pace-max-input" type="number" min="@_dataLapMin" max="@_dataLapMax"
+                   @bind="_lapTo" @bind:event="onchange" @bind:after="OnLapRangeInput" />
+        </label>
+        <span class="text-muted mono" style="font-size: 0.75rem;">Y = @_yHint</span>
     </div>
 
     @if (_driverOptions.Count > 0)
@@ -28,10 +90,14 @@
             @foreach (var d in _driverOptions)
             {
                 var selected = _selectedDrivers.Contains(d.Number);
-                <label class="pace-driver-chip @(selected ? "is-on" : null)" style="--chip: @d.Color">
+                var focused = _hoverDriver == d.Number;
+                <label class="pace-driver-chip @(selected ? "is-on" : null) @(focused ? "is-focus" : null)"
+                       style="--chip: @d.Color"
+                       @onmouseenter="() => SetHoverDriver(d.Number)"
+                       @onmouseleave="ClearHoverDriver">
                     <input type="checkbox" checked="@selected" @onchange="() => ToggleDriver(d.Number)" />
-                    <span class="swatch"></span>
-                    @(d.Code ?? $"#{d.Number}")
+                    <span class="swatch" aria-hidden="true"></span>
+                    <span class="code">@(d.Code ?? $"#{d.Number}")</span>
                 </label>
             }
         </div>
@@ -39,95 +105,394 @@
 
     @if (!_hasPlot)
     {
-        <p class="mb-0 text-muted">No lap times to plot for the selected drivers.</p>
+        <p class="mb-0 text-muted">No @_emptyLabel samples to plot for the selected drivers.</p>
     }
     else
     {
-        <div class="pace-svg-wrap" @onmouseleave="ClearTip">
-            <svg class="pace-svg" viewBox="0 0 @_vbW @_vbH" role="img" aria-label="Lap time pace chart">
+        <div class="pace-layout">
+        <div class="pace-svg-wrap @(_crosshair ? "is-crosshair" : null) @(_draggingZoom ? "is-zooming" : null)"
+             @onmouseenter="OnPlotEnterAsync"
+             @onmousedown="OnPlotMouseDownAsync"
+             @onmousemove="OnPlotMouseMoveAsync"
+             @onmouseup="OnPlotMouseUp"
+             @onmouseleave="OnPlotLeave"
+             @onwheel="OnPlotWheelAsync"
+             @onwheel:preventDefault="true">
+            @if (IsZoomed)
+            {
+                <button type="button" class="pace-reset-zoom" @onclick="ResetZoom" @onmousedown:stopPropagation="true">
+                    Reset Zoom
+                </button>
+            }
+
+            <svg @ref="_svgRef" class="pace-svg" viewBox="0 0 @_vbW @_vbH" role="img" aria-label="@_emptyLabel chart">
+                <defs>
+                    <clipPath id="pace-plot-clip">
+                        <rect x="@_padL" y="@_padT" width="@_plotW" height="@_plotH" />
+                    </clipPath>
+                </defs>
+
                 <rect x="@_padL" y="@_padT" width="@_plotW" height="@_plotH" class="pace-plot-bg" />
 
                 @foreach (var tick in _yTicks)
                 {
                     var y = MapY(tick);
                     <line x1="@_padL" y1="@y" x2="@(_padL + _plotW)" y2="@y" class="pace-grid" />
-                    @SvgText(_padL - 8, y + 4, FormatAxisTime(tick), "end")
+                    @SvgText(_padL - 8, y + 4, FormatAxisValue(tick), "end")
                 }
 
                 @foreach (var lap in _xTicks)
                 {
                     var x = MapX(lap);
                     <line x1="@x" y1="@_padT" x2="@x" y2="@(_padT + _plotH)" class="pace-grid" />
-                    @SvgText(x, _padT + _plotH + 18, lap.ToString(CultureInfo.InvariantCulture), "middle")
+                    @SvgText(x, _padT + _plotH + 16, lap.ToString(CultureInfo.InvariantCulture), "middle")
+                }
+
+                @{
+                    var seriesDrawOrder = _hoverDriver is int focusNo
+                        ? _series.OrderBy(s => s.Number == focusNo ? 1 : 0).ToList()
+                        : _series;
+                }
+                @foreach (var series in seriesDrawOrder)
+                {
+                    var hasHover = _hoverDriver is not null;
+                    var dim = hasHover && _hoverDriver != series.Number;
+                    var focus = _hoverDriver == series.Number;
+                    var opacity = focus ? "1" : dim ? "0.3" : "0.85";
+                    var width = focus ? "3" : "2";
+                    <g class="pace-series @(focus ? "is-focus" : null) @(dim ? "is-dim" : null)" opacity="@opacity">
+                        <polyline points="@series.PointsAttr" fill="none" stroke="@series.Color"
+                                  stroke-width="@width"
+                                  stroke-linejoin="round" stroke-linecap="round"
+                                  class="pace-line" />
+                        @foreach (var pt in series.Points)
+                        {
+                            var cx = MapX(pt.LapNumber);
+                            var cy = MapY(pt.Value);
+                            <circle cx="@cx" cy="@cy" r="@(focus ? "4" : "3.5")"
+                                    fill="@CompoundColor(pt.Compound, series.Color)"
+                                    stroke="@series.Color"
+                                    stroke-width="1.25"
+                                    class="pace-dot"
+                                    @onmouseenter="() => OnDotEnter(pt, series)" />
+                        }
+                    </g>
                 }
 
                 @foreach (var series in _series)
                 {
-                    <polyline points="@series.PointsAttr" fill="none" stroke="@series.Color" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-                    @foreach (var pt in series.Points)
+                    <polyline points="@series.PointsAttr" fill="none" stroke="transparent" stroke-width="16"
+                              stroke-linejoin="round" stroke-linecap="round" class="pace-series-hit"
+                              @onmouseenter="() => SetHoverDriver(series.Number)"
+                              @onmouseleave="ClearHoverDriver" />
+                }
+
+                @if (_crosshair && _crosshairLap is int cxLap && _crosshairSvgY is double cyLine)
+                {
+                    var cx = MapX(cxLap);
+                    <line x1="@cx" y1="@_padT" x2="@cx" y2="@(_padT + _plotH)" class="pace-crosshair" />
+                    <line x1="@_padL" y1="@cyLine" x2="@(_padL + _plotW)" y2="@cyLine" class="pace-crosshair" />
+                    @foreach (var series in seriesDrawOrder)
                     {
-                        var cx = MapX(pt.LapNumber);
-                        var cy = MapY(pt.LapTimeSeconds);
-                        <circle cx="@cx" cy="@cy" r="3.5"
-                                fill="@CompoundColor(pt.Compound, series.Color)"
-                                stroke="@series.Color"
-                                stroke-width="1.25"
-                                class="pace-dot"
-                                @onmouseenter="() => ShowTip(pt, series.Color)" />
+                        var pt = series.Points.FirstOrDefault(p => p.LapNumber == cxLap);
+                        if (pt is null) continue;
+                        var hasHover = _hoverDriver is not null;
+                        var dim = hasHover && _hoverDriver != series.Number;
+                        var focus = _hoverDriver == series.Number;
+                        var dotOpacity = focus ? "1" : dim ? "0.3" : "0.85";
+                        <circle cx="@cx" cy="@MapY(pt.Value)" r="@(focus ? "5" : "4")"
+                                fill="@series.Color" class="pace-crosshair-dot"
+                                opacity="@dotOpacity" />
+                    }
+                }
+
+                @if (_draggingZoom && _zoomBox is { } box)
+                {
+                    <g clip-path="url(#pace-plot-clip)">
+                        <rect x="@box.X" y="@_padT" width="@box.W" height="@_plotH" class="pace-zoom-box" />
+                    </g>
+                }
+
+                @if (_crosshair && _crosshairLap is int badgeLap && _crosshairSvgY is double badgeY)
+                {
+                    var cx = MapX(badgeLap);
+                    var yLabel = FormatCrosshairY(_crosshairValue);
+                    var yBadgeW = Math.Clamp(yLabel.Length * 6.4 + 10, 42, 72);
+                    var yBadgeX = Math.Max(2, _padL - yBadgeW - 4);
+                    var yBadgeY = Math.Clamp(badgeY - 9, _padT, _padT + _plotH - 18);
+                    <g class="pace-axis-readout">
+                        <rect class="pace-axis-readout-bg" x="@yBadgeX" y="@yBadgeY" width="@yBadgeW" height="18" rx="3" />
+                        @SvgText(yBadgeX + yBadgeW / 2, yBadgeY + 12.5, yLabel, "middle", "pace-axis-readout-text")
+                    </g>
+
+                    var xLabel = $"Lap {badgeLap.ToString(CultureInfo.InvariantCulture)}";
+                    var xBadgeW = Math.Clamp(xLabel.Length * 6.4 + 12, 44, 72);
+                    var xBadgeX = Math.Clamp(cx - xBadgeW / 2, _padL, _padL + _plotW - xBadgeW);
+                    var xBadgeY = Math.Max(2, _padT - 22);
+                    <g class="pace-axis-readout">
+                        <rect class="pace-axis-readout-bg" x="@xBadgeX" y="@xBadgeY" width="@xBadgeW" height="18" rx="3" />
+                        @SvgText(xBadgeX + xBadgeW / 2, xBadgeY + 12.5, xLabel, "middle", "pace-axis-readout-text")
+                    </g>
+                }
+
+                @if (_stintRows.Count > 0)
+                {
+                    var stripY0 = _padT + _plotH + _axisLabelBand;
+                    @for (var i = 0; i < _stintRows.Count; i++)
+                    {
+                        var row = _stintRows[i];
+                        var y = stripY0 + i * _stintRowH;
+                        var dim = _hoverDriver is int hd && hd != row.DriverNumber;
+                        <g class="pace-stint-row @(dim ? "is-dim" : null)" opacity="@(dim ? "0.35" : "1")">
+                            @SvgText(_padL - 8, y + _stintBarH - 1, row.Code, "end", "pace-stint-label")
+                            @foreach (var seg in row.Segments)
+                            {
+                                <rect x="@seg.X" y="@y" width="@seg.W" height="@_stintBarH" rx="1.5"
+                                      class="pace-stint-seg"
+                                      fill="@seg.Color"
+                                      stroke="var(--border)"
+                                      stroke-width="0.5"
+                                      @onmouseenter="() => ShowStintTip(row, seg)"
+                                      @onmouseleave="ClearStintTip" />
+                            }
+                        </g>
                     }
                 }
 
                 @SvgText(_padL + _plotW / 2, _vbH - 6, "Lap", "middle", "pace-axis-title")
             </svg>
 
-            @if (_tip is not null)
+            @if (_stintTip is not null)
+            {
+                <div class="pace-tip pace-tip-stint">
+                    <strong>@_stintTip.Driver</strong>
+                    <span>@_stintTip.Summary</span>
+                </div>
+            }
+            else if (_crosshair && _crosshairLap is int tipLap && _crosshairRows.Count > 0)
+            {
+                <div class="pace-tip pace-tip-multi">
+                    <div class="pace-tip-head">
+                        <strong>Lap @tipLap</strong>
+                        <span>@_metricShort</span>
+                    </div>
+                    @foreach (var row in _crosshairRows)
+                    {
+                        var rowFocus = _hoverDriver is null || _hoverDriver == row.DriverNumber;
+                        <div class="pace-tip-row @(rowFocus ? null : "is-dim")" style="--chip: @row.Color">
+                            <span class="swatch"></span>
+                            <span class="code">@row.Code</span>
+                            <span class="mono val">@row.Formatted</span>
+                            <span class="mono gap">@row.GapText</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(row.StintText))
+                        {
+                            <div class="pace-tip-stint-line @(rowFocus ? null : "is-dim")">@row.StintText</div>
+                        }
+                    }
+                </div>
+            }
+            else if (!_crosshair && _tip is not null)
             {
                 <div class="pace-tip">
                     <strong>@_tip.Driver</strong>
                     <span>Lap @_tip.Lap</span>
-                    <span class="mono">@_tip.Time</span>
-                    <span>@(string.IsNullOrEmpty(_tip.Compound) ? "—" : _tip.Compound)</span>
-                    <span>Age @(_tip.TyreAge?.ToString() ?? "—")</span>
+                    <span class="mono">@_tip.Value</span>
+                    <span>@_tip.Metric</span>
+                    @if (!string.IsNullOrEmpty(_tip.StintText))
+                    {
+                        <span>@_tip.StintText</span>
+                    }
+                    else
+                    {
+                        <span>@(string.IsNullOrEmpty(_tip.Compound) ? "—" : _tip.Compound)</span>
+                        <span>Tyre age @(_tip.TyreAge?.ToString(CultureInfo.InvariantCulture) ?? "—")</span>
+                    }
                 </div>
             }
+        </div>
+
+        <aside class="pace-track-aside">
+            <TrackMap CircuitShortName="@CircuitShortName"
+                      Location="@Location"
+                      Progress="_trackProgress"
+                      HighlightSector="TrackHighlightSector"
+                      ShowMarker="@(_crosshair && _crosshairLap is not null)"
+                      ActiveLap="_crosshairLap" />
+        </aside>
         </div>
     }
 </div>
 
 @code {
+    private enum ChartMetric { LapTime, GapToLeader, IntervalToAhead, TopSpeed }
+    private enum PaceSplit { FullLap, Sector1, Sector2, Sector3 }
+
+    private static readonly (ChartMetric Value, string Label)[] ChartMetricOptions =
+    [
+        (ChartMetric.LapTime, "Lap Time"),
+        (ChartMetric.GapToLeader, "Gap to Leader"),
+        (ChartMetric.IntervalToAhead, "Interval to Ahead"),
+        (ChartMetric.TopSpeed, "Top Speed (km/h)")
+    ];
+
+    private static readonly (PaceSplit Value, string Label)[] SplitOptions =
+    [
+        (PaceSplit.FullLap, "Full Lap"),
+        (PaceSplit.Sector1, "Sector 1"),
+        (PaceSplit.Sector2, "Sector 2"),
+        (PaceSplit.Sector3, "Sector 3")
+    ];
+
     [Parameter] public IReadOnlyList<LapTimePointDto> Points { get; set; } = [];
+    [Parameter] public IReadOnlyList<StintDto> Stints { get; set; } = [];
     [Parameter] public IReadOnlyDictionary<int, string>? TeamByDriver { get; set; }
+    [Parameter] public string? CircuitShortName { get; set; }
+    [Parameter] public string? Location { get; set; }
 
     private static readonly string[] FallbackPalette =
         ["#E8A317", "#22D3EE", "#2BBF6A", "#C084FC", "#F07178", "#64C4FF", "#FF8000", "#A1A1AA"];
 
+    private ChartMetric _chartMetric = ChartMetric.LapTime;
+    private PaceSplit _split = PaceSplit.FullLap;
     private bool _hidePitLaps = true;
     private bool _clipOutliers = true;
-    private double _maxLapSeconds = 110; // 1:50 — caps SC / in-lap outliers on Y scale
+    private bool _crosshair;
+    private double _outlierLimit = DefaultOutlierLimit(ChartMetric.LapTime, PaceSplit.FullLap);
     private readonly HashSet<int> _selectedDrivers = new();
     private List<DriverOpt> _driverOptions = [];
     private List<SeriesGeom> _series = [];
+    private List<StintRowGeom> _stintRows = [];
+    private List<int> _laps = [];
     private List<int> _xTicks = [];
     private List<double> _yTicks = [];
     private bool _hasPlot;
     private TipState? _tip;
+    private StintTipState? _stintTip;
+    private int? _hoverDriver;
+    private int? _crosshairLap;
+    private double? _crosshairSvgY;
+    private double _crosshairValue;
+    private double _trackProgress;
+    private List<CrosshairRow> _crosshairRows = [];
+    private ElementReference _svgRef;
+    private SvgBounds? _svgBounds;
+
+    private int _dataLapMin = 1;
+    private int _dataLapMax = 1;
+    private int _lapFrom = 1;
+    private int _lapTo = 1;
+    private bool _lapRangeReady;
+
+    private bool _draggingZoom;
+    private double? _zoomDragStartX;
+    private double? _zoomDragCurrentX;
+    private (double X, double W)? _zoomBox;
 
     private const double _vbW = 800;
-    private const double _vbH = 380;
     private const double _padL = 64;
     private const double _padR = 16;
-    private const double _padT = 36; // room for top markers / tip
-    private const double _padB = 36;
+    private const double _padT = 36;
+    private const double _plotHFixed = 308;
+    private const double _axisLabelBand = 22;
+    private const double _stintBarH = 8;
+    private const double _stintRowH = 12;
+    private const double _titleBand = 16;
+    private const int MinZoomSpan = 2;
+    private double _padB => _axisLabelBand + (_stintRows.Count * _stintRowH) + _titleBand;
+    private double _vbH => _padT + _plotHFixed + _padB;
     private double _plotW => _vbW - _padL - _padR;
-    private double _plotH => _vbH - _padT - _padB;
+    private double _plotH => _plotHFixed;
 
-    private double _minLap, _maxLap, _minTime, _maxTime;
+    private double _minLap, _maxLap, _minValue, _maxValue;
+
+    private bool _isSpeed => _chartMetric == ChartMetric.TopSpeed;
+    private bool _isGapMetric =>
+        _chartMetric is ChartMetric.GapToLeader or ChartMetric.IntervalToAhead;
+    private bool IsZoomed => _lapRangeReady && (_lapFrom > _dataLapMin || _lapTo < _dataLapMax);
+
+    private string _yHint => _chartMetric switch
+    {
+        ChartMetric.TopSpeed => "top speed km/h (faster up)",
+        ChartMetric.GapToLeader => "gap to leader (0s up)",
+        ChartMetric.IntervalToAhead => "interval to ahead (0s up)",
+        _ => $"{_splitLabel} (faster up)"
+    };
+
+    private string _emptyLabel => _chartMetric switch
+    {
+        ChartMetric.TopSpeed => "top speed",
+        ChartMetric.GapToLeader => "gap",
+        ChartMetric.IntervalToAhead => "interval",
+        _ => _splitLabel
+    };
+
+    private string _splitLabel => _split switch
+    {
+        PaceSplit.Sector1 => "sector 1 time",
+        PaceSplit.Sector2 => "sector 2 time",
+        PaceSplit.Sector3 => "sector 3 time",
+        _ => "lap time"
+    };
+
+    private string _metricShort => _chartMetric switch
+    {
+        ChartMetric.TopSpeed => "ST",
+        ChartMetric.GapToLeader => "GAP",
+        ChartMetric.IntervalToAhead => "INT",
+        _ => _split switch
+        {
+            PaceSplit.Sector1 => "S1",
+            PaceSplit.Sector2 => "S2",
+            PaceSplit.Sector3 => "S3",
+            _ => "Lap"
+        }
+    };
+
+    private int TrackHighlightSector =>
+        _chartMetric == ChartMetric.LapTime
+        && _split is PaceSplit.Sector1 or PaceSplit.Sector2 or PaceSplit.Sector3
+            ? (int)_split
+            : 0;
 
     protected override void OnParametersSet()
     {
         RebuildDrivers();
-        RebuildGeometry();
+        RebuildGeometry(resetLapRange: false);
     }
+
+    private void SetChartMetric(ChartMetric metric)
+    {
+        if (_chartMetric == metric) return;
+        _chartMetric = metric;
+        if (_isGapMetric)
+        {
+            _split = PaceSplit.FullLap;
+        }
+
+        _outlierLimit = DefaultOutlierLimit(_chartMetric, _split);
+        RebuildGeometry(resetLapRange: false);
+    }
+
+    private void SetSplit(PaceSplit split)
+    {
+        if (_split == split) return;
+        _split = split;
+        if (_chartMetric == ChartMetric.LapTime)
+        {
+            _outlierLimit = DefaultOutlierLimit(ChartMetric.LapTime, split);
+        }
+
+        RebuildGeometry(resetLapRange: false);
+    }
+
+    private static double DefaultOutlierLimit(ChartMetric metric, PaceSplit split) =>
+        metric switch
+        {
+            ChartMetric.TopSpeed => 200,
+            ChartMetric.GapToLeader or ChartMetric.IntervalToAhead => 60,
+            _ => split == PaceSplit.FullLap ? 110 : 50
+        };
 
     private void RebuildDrivers()
     {
@@ -167,7 +532,24 @@
         }
     }
 
-    private void OnFilterChanged() => RebuildGeometry();
+    private void OnFilterChanged() => RebuildGeometry(resetLapRange: false);
+
+    private void OnLapRangeInput()
+    {
+        ApplyLapRange(_lapFrom, _lapTo);
+    }
+
+    private void OnCrosshairToggled()
+    {
+        _tip = null;
+        _stintTip = null;
+        _crosshairLap = null;
+        _crosshairSvgY = null;
+        _crosshairRows = [];
+        _trackProgress = 0;
+        _svgBounds = null;
+        CancelZoomDrag();
+    }
 
     private void ToggleDriver(int number)
     {
@@ -179,40 +561,198 @@
             }
         }
 
-        RebuildGeometry();
+        RebuildGeometry(resetLapRange: false);
     }
 
-    private void RebuildGeometry()
+    private double MetricValue(LapTimePointDto p)
+    {
+        if (_isSpeed) return p.TopSpeedKmh;
+        return _split switch
+        {
+            PaceSplit.Sector1 => p.Sector1Seconds,
+            PaceSplit.Sector2 => p.Sector2Seconds,
+            PaceSplit.Sector3 => p.Sector3Seconds,
+            _ => p.LapTimeSeconds
+        };
+    }
+
+    private bool PassesOutlierFilter(double value) =>
+        !_clipOutliers
+        || (_isSpeed ? value >= _outlierLimit : value <= _outlierLimit);
+
+    /// <summary>
+    /// Cumulative race-time gaps among selected drivers.
+    /// Gap to Leader = cum − leader cum; Interval = cum − car ahead by cum order.
+    /// </summary>
+    private List<PlotPoint> BuildGapPlotPoints()
+    {
+        const double absurdLapCap = 200; // always drop SC / in-laps before accumulating
+        var source = Points
+            .Where(p => _selectedDrivers.Contains(p.DriverNumber))
+            .Where(p => !_hidePitLaps || !p.IsPitLap)
+            .Where(p => p.LapTimeSeconds > 0 && p.LapTimeSeconds <= absurdLapCap)
+            .ToList();
+
+        if (source.Count == 0) return [];
+
+        // Per driver: lap → lap time, plus metadata from that lap sample.
+        var byDriver = source
+            .GroupBy(p => p.DriverNumber)
+            .ToDictionary(
+                g => g.Key,
+                g => g.GroupBy(x => x.LapNumber)
+                      .ToDictionary(x => x.Key, x => x.First()));
+
+        var allLaps = source.Select(p => p.LapNumber).Distinct().OrderBy(x => x).ToList();
+        var cum = _selectedDrivers.ToDictionary(d => d, _ => 0.0);
+        var result = new List<PlotPoint>();
+
+        foreach (var lap in allLaps)
+        {
+            var present = new List<(int Driver, double Cum, LapTimePointDto Sample)>();
+            foreach (var driver in _selectedDrivers)
+            {
+                if (!byDriver.TryGetValue(driver, out var laps)) continue;
+                if (!laps.TryGetValue(lap, out var sample)) continue;
+                cum[driver] += sample.LapTimeSeconds;
+                present.Add((driver, cum[driver], sample));
+            }
+
+            if (present.Count == 0) continue;
+
+            present.Sort((a, b) => a.Cum.CompareTo(b.Cum));
+            var leaderCum = present[0].Cum;
+
+            for (var i = 0; i < present.Count; i++)
+            {
+                var (driver, c, sample) = present[i];
+                var value = _chartMetric == ChartMetric.GapToLeader
+                    ? c - leaderCum
+                    : i == 0 ? 0 : c - present[i - 1].Cum;
+
+                if (!PassesOutlierFilter(value)) continue;
+
+                result.Add(new PlotPoint(
+                    lap,
+                    value,
+                    driver,
+                    sample.DriverCode,
+                    sample.Compound,
+                    sample.TyreAge,
+                    sample.StintNumber));
+            }
+        }
+
+        return result;
+    }
+
+    private List<PlotPoint> BuildBasePlotPoints()
+    {
+        if (_isGapMetric) return BuildGapPlotPoints();
+
+        return Points
+            .Where(p => _selectedDrivers.Contains(p.DriverNumber))
+            .Where(p => !_hidePitLaps || !p.IsPitLap)
+            .Select(p => new PlotPoint(
+                p.LapNumber,
+                MetricValue(p),
+                p.DriverNumber,
+                p.DriverCode,
+                p.Compound,
+                p.TyreAge,
+                p.StintNumber))
+            .Where(p => p.Value > 0)
+            .Where(p => PassesOutlierFilter(p.Value))
+            .ToList();
+    }
+
+    private void RebuildGeometry(bool resetLapRange)
     {
         _tip = null;
-        var filtered = Points
-            .Where(p => p.LapTimeSeconds > 0)
-            .Where(p => !_hidePitLaps || !p.IsPitLap)
-            .Where(p => !_clipOutliers || p.LapTimeSeconds <= _maxLapSeconds)
-            .Where(p => _selectedDrivers.Contains(p.DriverNumber))
+        _stintTip = null;
+        _crosshairLap = null;
+        _crosshairSvgY = null;
+        _crosshairRows = [];
+        _svgBounds = null;
+        CancelZoomDrag();
+
+        var baseFiltered = BuildBasePlotPoints();
+
+        _series = [];
+        _stintRows = [];
+        _laps = [];
+        _xTicks = [];
+        _yTicks = [];
+
+        if (baseFiltered.Count < 2)
+        {
+            _hasPlot = false;
+            _lapRangeReady = false;
+            return;
+        }
+
+        var dataMin = baseFiltered.Min(p => p.LapNumber);
+        var dataMax = baseFiltered.Max(p => p.LapNumber);
+        if (dataMax < dataMin) (dataMin, dataMax) = (dataMax, dataMin);
+
+        var extentChanged = !_lapRangeReady || dataMin != _dataLapMin || dataMax != _dataLapMax;
+        _dataLapMin = dataMin;
+        _dataLapMax = dataMax;
+
+        if (resetLapRange || !_lapRangeReady || extentChanged && (_lapFrom > dataMax || _lapTo < dataMin))
+        {
+            _lapFrom = dataMin;
+            _lapTo = dataMax;
+        }
+        else
+        {
+            _lapFrom = Math.Clamp(_lapFrom, dataMin, dataMax);
+            _lapTo = Math.Clamp(_lapTo, dataMin, dataMax);
+            if (_lapTo < _lapFrom) (_lapFrom, _lapTo) = (_lapTo, _lapFrom);
+        }
+
+        _lapRangeReady = true;
+
+        var filtered = baseFiltered
+            .Where(p => p.LapNumber >= _lapFrom && p.LapNumber <= _lapTo)
             .ToList();
 
         _hasPlot = filtered.Count >= 2;
-        _series = [];
-        _xTicks = [];
-        _yTicks = [];
         if (!_hasPlot) return;
 
-        _minLap = filtered.Min(p => p.LapNumber);
-        _maxLap = filtered.Max(p => p.LapNumber);
-        _minTime = filtered.Min(p => p.LapTimeSeconds);
-        _maxTime = filtered.Max(p => p.LapTimeSeconds);
+        _minLap = _lapFrom;
+        _maxLap = _lapTo;
         if (Math.Abs(_maxLap - _minLap) < 0.5) { _minLap -= 0.5; _maxLap += 0.5; }
-        if (Math.Abs(_maxTime - _minTime) < 0.05) { _minTime -= 0.25; _maxTime += 0.25; }
-        else
+
+        _minValue = filtered.Min(p => p.Value);
+        _maxValue = filtered.Max(p => p.Value);
+        if (_isGapMetric)
         {
-            var pad = (_maxTime - _minTime) * 0.08;
-            _minTime -= pad;
-            _maxTime += pad;
+            // Keep 0.0s (leader / ahead) near the top of the plot.
+            _minValue = Math.Min(_minValue, 0);
         }
 
-        _xTicks = BuildIntTicks((int)Math.Floor(_minLap), (int)Math.Ceiling(_maxLap));
-        _yTicks = BuildDoubleTicks(_minTime, _maxTime, 5);
+        if (Math.Abs(_maxValue - _minValue) < 0.05)
+        {
+            var pad = _isSpeed ? 5 : _isGapMetric ? 0.5 : 0.25;
+            _minValue -= pad;
+            _maxValue += pad;
+        }
+        else
+        {
+            var pad = (_maxValue - _minValue) * 0.08;
+            _minValue -= pad;
+            _maxValue += pad;
+        }
+
+        if (_isGapMetric && _minValue > -0.05)
+        {
+            _minValue = -0.05;
+        }
+
+        _laps = filtered.Select(p => p.LapNumber).Distinct().OrderBy(x => x).ToList();
+        _xTicks = BuildIntTicks(_lapFrom, _lapTo);
+        _yTicks = BuildDoubleTicks(_minValue, _maxValue, 5);
 
         _series = filtered
             .GroupBy(p => p.DriverNumber)
@@ -222,31 +762,484 @@
                 var opt = _driverOptions.First(d => d.Number == g.Key);
                 var pts = g.OrderBy(p => p.LapNumber).ToList();
                 var attr = string.Join(" ", pts.Select(p =>
-                    $"{MapX(p.LapNumber).ToString("0.##", CultureInfo.InvariantCulture)},{MapY(p.LapTimeSeconds).ToString("0.##", CultureInfo.InvariantCulture)}"));
+                    $"{MapX(p.LapNumber).ToString("0.##", CultureInfo.InvariantCulture)},{MapY(p.Value).ToString("0.##", CultureInfo.InvariantCulture)}"));
                 return new SeriesGeom(opt.Number, opt.Code ?? $"#{opt.Number}", opt.Color, pts, attr);
             })
             .ToList();
+
+        RebuildStintRows();
+    }
+
+    private void RebuildStintRows()
+    {
+        _stintRows = [];
+        if (Stints.Count == 0 || !_hasPlot) return;
+
+        foreach (var driver in _selectedDrivers
+                     .Select(n => _driverOptions.FirstOrDefault(d => d.Number == n))
+                     .Where(d => d is not null)
+                     .Cast<DriverOpt>()
+                     .OrderBy(d => d.Number))
+        {
+            var segments = new List<StintSegGeom>();
+            foreach (var s in Stints.Where(x => x.DriverNumber == driver.Number).OrderBy(x => x.StintNumber))
+            {
+                var start = s.LapStart ?? _lapFrom;
+                var end = s.LapEnd ?? _lapTo;
+                var from = Math.Max(start, _lapFrom);
+                var to = Math.Min(end, _lapTo);
+                if (to < from) continue;
+
+                var x0 = Math.Max(_padL, MapX(from - 0.5));
+                var x1 = Math.Min(_padL + _plotW, MapX(to + 0.5));
+                var w = x1 - x0;
+                if (w < 1) continue;
+
+                segments.Add(new StintSegGeom(
+                    s.StintNumber,
+                    from,
+                    to,
+                    start,
+                    end,
+                    s.Compound,
+                    s.TyreAgeAtStart,
+                    OfficialCompoundColor(s.Compound),
+                    x0,
+                    w,
+                    FormatStintSummary(s)));
+            }
+
+            if (segments.Count == 0) continue;
+            _stintRows.Add(new StintRowGeom(driver.Number, driver.Code ?? $"#{driver.Number}", segments));
+        }
+    }
+
+    private void ApplyLapRange(int from, int to)
+    {
+        if (!_lapRangeReady) return;
+        if (to < from) (from, to) = (to, from);
+        from = Math.Clamp(from, _dataLapMin, _dataLapMax);
+        to = Math.Clamp(to, _dataLapMin, _dataLapMax);
+        if (to - from < MinZoomSpan - 1)
+        {
+            to = Math.Min(_dataLapMax, from + MinZoomSpan - 1);
+            from = Math.Max(_dataLapMin, to - (MinZoomSpan - 1));
+        }
+
+        if (from == _lapFrom && to == _lapTo) return;
+        _lapFrom = from;
+        _lapTo = to;
+        RebuildGeometry(resetLapRange: false);
+    }
+
+    private void ResetZoom()
+    {
+        if (!_lapRangeReady) return;
+        ApplyLapRange(_dataLapMin, _dataLapMax);
     }
 
     private double MapX(double lap) =>
         _padL + (lap - _minLap) / (_maxLap - _minLap) * _plotW;
 
-    // SVG Y grows downward → faster (lower seconds) maps to smaller Y (top).
-    private double MapY(double seconds) =>
-        _padT + (seconds - _minTime) / (_maxTime - _minTime) * _plotH;
+    private double InverseMapX(double svgX) =>
+        _minLap + (svgX - _padL) / _plotW * (_maxLap - _minLap);
 
-    private void ShowTip(LapTimePointDto p, string color)
+    private double MapY(double value)
     {
-        _tip = new TipState(
-            p.DriverCode ?? $"#{p.DriverNumber}",
-            p.LapNumber,
-            ResultDisplay.FormatLapSeconds(p.LapTimeSeconds),
-            p.Compound,
-            p.TyreAge,
-            color);
+        var t = (value - _minValue) / (_maxValue - _minValue);
+        return _isSpeed
+            ? _padT + (1 - t) * _plotH
+            : _padT + t * _plotH;
     }
 
-    private void ClearTip() => _tip = null;
+    private double InverseMapY(double svgY)
+    {
+        var t = (svgY - _padT) / _plotH;
+        t = Math.Clamp(t, 0, 1);
+        return _isSpeed
+            ? _maxValue - t * (_maxValue - _minValue)
+            : _minValue + t * (_maxValue - _minValue);
+    }
+
+    private int SnapLap(double svgX)
+    {
+        if (_laps.Count == 0) return _lapFrom;
+        var raw = InverseMapX(svgX);
+        var best = _laps[0];
+        var bestDist = Math.Abs(best - raw);
+        for (var i = 1; i < _laps.Count; i++)
+        {
+            var d = Math.Abs(_laps[i] - raw);
+            if (d < bestDist)
+            {
+                best = _laps[i];
+                bestDist = d;
+            }
+        }
+
+        return best;
+    }
+
+    private void SetHoverDriver(int number) => _hoverDriver = number;
+
+    private void ClearHoverDriver() => _hoverDriver = null;
+
+    private void SetCrosshairLap(int lap)
+    {
+        if (_crosshairLap == lap && _crosshairRows.Count > 0) return;
+
+        _crosshairLap = lap;
+        _tip = null;
+        _stintTip = null;
+
+        var rows = new List<CrosshairRow>();
+        foreach (var series in _series)
+        {
+            var pt = series.Points.FirstOrDefault(p => p.LapNumber == lap);
+            if (pt is null) continue;
+            rows.Add(new CrosshairRow(
+                series.Number,
+                series.Code,
+                series.Color,
+                pt.Value,
+                FormatValue(pt.Value),
+                "",
+                FormatPointStint(pt)));
+        }
+
+        if (rows.Count == 0)
+        {
+            _crosshairRows = [];
+            return;
+        }
+
+        rows = _isSpeed
+            ? rows.OrderByDescending(r => r.Value).ToList()
+            : rows.OrderBy(r => r.Value).ToList();
+
+        var best = rows[0].Value;
+        _crosshairRows = rows
+            .Select((r, i) =>
+            {
+                var gap = _isSpeed ? best - r.Value : r.Value - best;
+                var gapText = i == 0 ? "—" : FormatGap(gap);
+                return r with { GapText = gapText };
+            })
+            .ToList();
+    }
+
+    private async Task OnPlotEnterAsync() => await RefreshSvgBoundsAsync();
+
+    private async Task OnPlotMouseDownAsync(MouseEventArgs e)
+    {
+        if (!_hasPlot || e.Button != 0) return;
+        if (_svgBounds is null || _svgBounds.Width < 1)
+        {
+            await RefreshSvgBoundsAsync();
+            if (_svgBounds is null) return;
+        }
+
+        var (svgX, svgY) = ClientToSvg(e);
+        if (!IsInsidePlot(svgX, svgY)) return;
+
+        _draggingZoom = true;
+        _zoomDragStartX = Math.Clamp(svgX, _padL, _padL + _plotW);
+        _zoomDragCurrentX = _zoomDragStartX;
+        UpdateZoomBox();
+    }
+
+    private async Task OnPlotMouseMoveAsync(MouseEventArgs e)
+    {
+        if (!_hasPlot) return;
+
+        if (_svgBounds is null || _svgBounds.Width < 1)
+        {
+            await RefreshSvgBoundsAsync();
+            if (_svgBounds is null) return;
+        }
+
+        var (svgX, svgY) = ClientToSvg(e);
+
+        if (_draggingZoom && _zoomDragStartX is not null)
+        {
+            _zoomDragCurrentX = Math.Clamp(svgX, _padL, _padL + _plotW);
+            UpdateZoomBox();
+        }
+
+        if (!_crosshair) return;
+
+        if (!IsInsidePlot(svgX, svgY))
+        {
+            _crosshairLap = null;
+            _crosshairSvgY = null;
+            _crosshairRows = [];
+            return;
+        }
+
+        var lap = SnapLap(svgX);
+        var y = Math.Clamp(svgY, _padT, _padT + _plotH);
+        var value = InverseMapY(y);
+
+        if (_crosshairLap == lap
+            && _crosshairSvgY is double prevY
+            && Math.Abs(prevY - y) < 0.35
+            && Math.Abs(_crosshairValue - value) < (_isSpeed ? 0.25 : 0.002)
+            && !_draggingZoom)
+        {
+            return;
+        }
+
+        SetCrosshairLap(lap);
+        _crosshairSvgY = y;
+        _crosshairValue = value;
+        // Scrub track map along the lap using cursor Y (0 = S/F, 1 = end of lap / sector).
+        _trackProgress = Math.Clamp((y - _padT) / _plotH, 0, 1);
+    }
+
+    private void OnPlotMouseUp(MouseEventArgs e)
+    {
+        if (!_draggingZoom || _zoomDragStartX is null || _zoomDragCurrentX is null)
+        {
+            CancelZoomDrag();
+            return;
+        }
+
+        var x0 = Math.Min(_zoomDragStartX.Value, _zoomDragCurrentX.Value);
+        var x1 = Math.Max(_zoomDragStartX.Value, _zoomDragCurrentX.Value);
+        CancelZoomDrag();
+
+        if (x1 - x0 < 10) return;
+
+        var fromLap = (int)Math.Floor(InverseMapX(x0) + 0.0001);
+        var toLap = (int)Math.Ceiling(InverseMapX(x1) - 0.0001);
+        ApplyLapRange(fromLap, toLap);
+    }
+
+    private async Task OnPlotWheelAsync(WheelEventArgs e)
+    {
+        if (!_hasPlot || !_lapRangeReady) return;
+
+        if (_svgBounds is null || _svgBounds.Width < 1)
+        {
+            await RefreshSvgBoundsAsync();
+            if (_svgBounds is null) return;
+        }
+
+        var (svgX, _) = ClientToSvg(e.ClientX, e.ClientY);
+        if (svgX < _padL || svgX > _padL + _plotW) return;
+
+        var center = InverseMapX(Math.Clamp(svgX, _padL, _padL + _plotW));
+        var span = Math.Max(MinZoomSpan, _lapTo - _lapFrom);
+        var zoomOut = e.DeltaY > 0;
+        var newSpan = zoomOut
+            ? (int)Math.Ceiling(span * 1.25)
+            : (int)Math.Floor(span * 0.8);
+        newSpan = Math.Clamp(newSpan, MinZoomSpan, Math.Max(MinZoomSpan, _dataLapMax - _dataLapMin));
+
+        if (!zoomOut && newSpan >= span && span > MinZoomSpan)
+        {
+            newSpan = span - 1;
+        }
+
+        if (zoomOut && newSpan <= span && span < _dataLapMax - _dataLapMin)
+        {
+            newSpan = span + 1;
+        }
+
+        var half = newSpan / 2.0;
+        var from = (int)Math.Round(center - half);
+        var to = from + newSpan;
+        if (to > _dataLapMax)
+        {
+            to = _dataLapMax;
+            from = Math.Max(_dataLapMin, to - newSpan);
+        }
+
+        if (from < _dataLapMin)
+        {
+            from = _dataLapMin;
+            to = Math.Min(_dataLapMax, from + newSpan);
+        }
+
+        ApplyLapRange(from, to);
+    }
+
+    private void UpdateZoomBox()
+    {
+        if (_zoomDragStartX is null || _zoomDragCurrentX is null)
+        {
+            _zoomBox = null;
+            return;
+        }
+
+        var x0 = Math.Min(_zoomDragStartX.Value, _zoomDragCurrentX.Value);
+        var x1 = Math.Max(_zoomDragStartX.Value, _zoomDragCurrentX.Value);
+        _zoomBox = (x0, Math.Max(1, x1 - x0));
+    }
+
+    private void CancelZoomDrag()
+    {
+        _draggingZoom = false;
+        _zoomDragStartX = null;
+        _zoomDragCurrentX = null;
+        _zoomBox = null;
+    }
+
+    private (double X, double Y) ClientToSvg(MouseEventArgs e) =>
+        ClientToSvg(e.ClientX, e.ClientY);
+
+    private (double X, double Y) ClientToSvg(double clientX, double clientY)
+    {
+        var b = _svgBounds!;
+        var x = (clientX - b.Left) / b.Width * _vbW;
+        var y = (clientY - b.Top) / b.Height * _vbH;
+        return (x, y);
+    }
+
+    private bool IsInsidePlot(double svgX, double svgY) =>
+        svgX >= _padL && svgX <= _padL + _plotW && svgY >= _padT && svgY <= _padT + _plotH;
+
+    private async Task RefreshSvgBoundsAsync()
+    {
+        try
+        {
+            _svgBounds = await Js.InvokeAsync<SvgBounds?>("ftChart.svgBounds", _svgRef);
+        }
+        catch
+        {
+            _svgBounds = null;
+        }
+    }
+
+    private void OnDotEnter(PlotPoint pt, SeriesGeom series)
+    {
+        SetHoverDriver(series.Number);
+        if (_crosshair || _draggingZoom) return;
+
+        _stintTip = null;
+        _tip = new TipState(
+            pt.DriverCode ?? $"#{pt.DriverNumber}",
+            pt.LapNumber,
+            FormatValue(pt.Value),
+            _metricShort,
+            pt.Compound,
+            pt.TyreAge,
+            FormatPointStint(pt),
+            series.Color);
+    }
+
+    private void ShowStintTip(StintRowGeom row, StintSegGeom seg)
+    {
+        SetHoverDriver(row.DriverNumber);
+        if (_draggingZoom) return;
+        _tip = null;
+        _stintTip = new StintTipState(row.Code, seg.Summary);
+    }
+
+    private void ClearStintTip()
+    {
+        _stintTip = null;
+        ClearHoverDriver();
+    }
+
+    private void OnPlotLeave()
+    {
+        _tip = null;
+        _stintTip = null;
+        _crosshairLap = null;
+        _crosshairSvgY = null;
+        _crosshairRows = [];
+        _trackProgress = 0;
+        _hoverDriver = null;
+        _svgBounds = null;
+        CancelZoomDrag();
+    }
+
+    private string FormatPointStint(PlotPoint pt)
+    {
+        if (pt.StintNumber is null && string.IsNullOrWhiteSpace(pt.Compound)) return "";
+        var stint = Stints.FirstOrDefault(s =>
+            s.DriverNumber == pt.DriverNumber
+            && (pt.StintNumber is null || s.StintNumber == pt.StintNumber)
+            && pt.LapNumber >= (s.LapStart ?? int.MinValue)
+            && pt.LapNumber <= (s.LapEnd ?? int.MaxValue));
+        return stint is null ? FormatCompoundName(pt.Compound) : FormatStintSummary(stint);
+    }
+
+    private static string FormatStintSummary(StintDto s)
+    {
+        var compound = FormatCompoundName(s.Compound);
+        var ageLabel = s.TyreAgeAtStart is null or 0 ? "New" : $"Age {s.TyreAgeAtStart}";
+        var start = s.LapStart ?? 0;
+        var end = s.LapEnd ?? start;
+        var laps = Math.Max(1, end - start + 1);
+        return $"Stint {s.StintNumber}: {compound} ({ageLabel}) – Laps {start} to {end} ({laps} laps)";
+    }
+
+    private static string FormatCompoundName(string? compound)
+    {
+        var c = (compound ?? "").Trim().ToUpperInvariant();
+        return c switch
+        {
+            "SOFT" => "Soft",
+            "MEDIUM" => "Medium",
+            "HARD" => "Hard",
+            "INTERMEDIATE" or "INTER" => "Intermediate",
+            "WET" => "Wet",
+            "" => "Unknown",
+            _ => compound!.Trim()
+        };
+    }
+
+    private string FormatValue(double value)
+    {
+        if (_isSpeed)
+        {
+            return $"{value.ToString("0", CultureInfo.InvariantCulture)} km/h";
+        }
+
+        if (_isGapMetric)
+        {
+            return FormatGapSeconds(value);
+        }
+
+        return ResultDisplay.FormatLapSeconds(value);
+    }
+
+    private string FormatCrosshairY(double value)
+    {
+        if (_isSpeed)
+        {
+            return value.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
+        if (_isGapMetric)
+        {
+            return FormatGapSeconds(value);
+        }
+
+        return ResultDisplay.FormatLapSeconds(value);
+    }
+
+    private static string FormatGapSeconds(double seconds)
+    {
+        if (Math.Abs(seconds) < 0.0005) return "+0.000s";
+        var sign = seconds > 0 ? "+" : "";
+        return sign + seconds.ToString("0.000", CultureInfo.InvariantCulture) + "s";
+    }
+
+    private string FormatGap(double gap)
+    {
+        if (_isSpeed)
+        {
+            return gap < 0.5
+                ? "—"
+                : $"-{gap.ToString("0", CultureInfo.InvariantCulture)}";
+        }
+
+        if (Math.Abs(gap) < 0.0005) return "—";
+        return "+" + gap.ToString("0.000", CultureInfo.InvariantCulture) + (_isGapMetric ? "s" : "");
+    }
 
     private static MarkupString SvgText(double x, double y, string content, string anchor, string cssClass = "pace-axis-label")
     {
@@ -257,30 +1250,45 @@
             $"<text x=\"{xi}\" y=\"{yi}\" text-anchor=\"{anchor}\" class=\"{cssClass}\">{safe}</text>");
     }
 
-    private static string CompoundColor(string? compound, string fallback)
+    private static string CompoundColor(string? compound, string fallback) =>
+        string.IsNullOrWhiteSpace(compound) ? fallback : OfficialCompoundColor(compound);
+
+    private static string OfficialCompoundColor(string? compound)
     {
         var c = (compound ?? "").Trim().ToUpperInvariant();
         return c switch
         {
-            "SOFT" => "#E74C5C",
-            "MEDIUM" => "#F0C419",
-            "HARD" => "#E8EAED",
-            "INTERMEDIATE" or "INTER" => "#2BBF6A",
-            "WET" => "#3B82F6",
-            _ => fallback
+            "SOFT" => "#FF1801",
+            "MEDIUM" => "#FFF200",
+            "HARD" => "#FFFFFF",
+            "INTERMEDIATE" or "INTER" => "#39B54A",
+            "WET" => "#00AEEF",
+            _ => "#71717A"
         };
     }
 
-    private static string FormatAxisTime(double seconds)
+    private string FormatAxisValue(double value)
     {
-        if (seconds >= 60)
+        if (_isSpeed)
         {
-            var m = (int)(seconds / 60);
-            var rem = seconds - m * 60;
+            return value.ToString("0", CultureInfo.InvariantCulture);
+        }
+
+        if (_isGapMetric)
+        {
+            if (Math.Abs(value) < 0.05) return "+0.0s";
+            var sign = value > 0 ? "+" : "";
+            return sign + value.ToString("0.0", CultureInfo.InvariantCulture) + "s";
+        }
+
+        if (value >= 60)
+        {
+            var m = (int)(value / 60);
+            var rem = value - m * 60;
             return $"{m}:{rem.ToString("00.0", CultureInfo.InvariantCulture)}";
         }
 
-        return seconds.ToString("0.0", CultureInfo.InvariantCulture);
+        return value.ToString("0.0", CultureInfo.InvariantCulture);
     }
 
     private static List<int> BuildIntTicks(int min, int max)
@@ -306,6 +1314,19 @@
     }
 
     private sealed record DriverOpt(int Number, string? Code, string Color);
-    private sealed record SeriesGeom(int Number, string Code, string Color, List<LapTimePointDto> Points, string PointsAttr);
-    private sealed record TipState(string Driver, int Lap, string Time, string? Compound, int? TyreAge, string Color);
+    private sealed record PlotPoint(int LapNumber, double Value, int DriverNumber, string? DriverCode, string? Compound, int? TyreAge, int? StintNumber);
+    private sealed record SeriesGeom(int Number, string Code, string Color, List<PlotPoint> Points, string PointsAttr);
+    private sealed record TipState(string Driver, int Lap, string Value, string Metric, string? Compound, int? TyreAge, string StintText, string Color);
+    private sealed record CrosshairRow(int DriverNumber, string Code, string Color, double Value, string Formatted, string GapText, string StintText);
+    private sealed record StintSegGeom(int StintNumber, int VisibleFrom, int VisibleTo, int LapStart, int LapEnd, string? Compound, int? TyreAgeAtStart, string Color, double X, double W, string Summary);
+    private sealed record StintRowGeom(int DriverNumber, string Code, List<StintSegGeom> Segments);
+    private sealed record StintTipState(string Driver, string Summary);
+
+    private sealed class SvgBounds
+    {
+        public double Left { get; set; }
+        public double Top { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+    }
 }

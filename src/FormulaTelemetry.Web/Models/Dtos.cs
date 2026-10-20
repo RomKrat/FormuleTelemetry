@@ -65,14 +65,33 @@ public sealed class LapDto
     public string? NameAcronym { get; set; }
 }
 
-/// <summary>One lap sample for the Race Pace chart.</summary>
+/// <summary>One lap sample for the Race Pace chart (full lap + sector splits).</summary>
 public sealed class LapTimePointDto
 {
     public int LapNumber { get; set; }
     public double LapTimeSeconds { get; set; }
+    public double Sector1Seconds { get; set; }
+    public double Sector2Seconds { get; set; }
+    public double Sector3Seconds { get; set; }
+    /// <summary>Speed trap (ST) in km/h when available.</summary>
+    public double TopSpeedKmh { get; set; }
     public string? DriverCode { get; set; }
     public int DriverNumber { get; set; }
     public string? Compound { get; set; }
     public int? TyreAge { get; set; }
+    public int? StintNumber { get; set; }
     public bool IsPitLap { get; set; }
+}
+
+/// <summary>OpenF1 tyre stint for a driver in a session.</summary>
+public sealed class StintDto
+{
+    public int SessionKey { get; set; }
+    public int DriverNumber { get; set; }
+    public int StintNumber { get; set; }
+    public int MeetingKey { get; set; }
+    public int? LapStart { get; set; }
+    public int? LapEnd { get; set; }
+    public string? Compound { get; set; }
+    public int? TyreAgeAtStart { get; set; }
 }

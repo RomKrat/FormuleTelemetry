@@ -16,7 +16,7 @@ else
 {
     <p class="text-muted mb-3 session-meta">
         @_session.SessionName
-        · @(_session.DateStart?.ToString("yyyy-MM-dd HH:mm") ?? "—") UTC
+        · @(_session.DateStart?.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) ?? "—") UTC
     </p>
 
     <ul class="nav nav-tabs mb-3">
@@ -190,7 +190,11 @@ else
         }
         else if (_pacePoints is { Count: > 0 })
         {
-            <LapTimeChart Points="_pacePoints" TeamByDriver="_paceTeams" />
+            <LapTimeChart Points="_pacePoints"
+                          Stints="_paceStints"
+                          TeamByDriver="_paceTeams"
+                          CircuitShortName="@_session?.CircuitShortName"
+                          Location="@_session?.Location" />
         }
         else
         {
@@ -206,6 +210,7 @@ else
     private List<SessionResultDto>? _results;
     private List<EvaluatedLap>? _evaluatedLaps;
     private List<LapTimePointDto>? _pacePoints;
+    private List<StintDto> _paceStints = [];
     private Dictionary<int, string>? _paceTeams;
     private bool _loading = true;
     private bool _lapsLoading;
@@ -228,6 +233,7 @@ else
         _tab = "results";
         _evaluatedLaps = null;
         _pacePoints = null;
+        _paceStints = [];
         _paceTeams = null;
         _segmentBests.Clear();
         _raceBest = null;
@@ -423,8 +429,9 @@ else
         try
         {
             var raw = await Api.GetLapsAsync(SessionKey) ?? [];
+            _paceStints = await Api.GetStintsAsync(SessionKey) ?? [];
             _evaluatedLaps = LapTimingEvaluator.Evaluate(raw).ToList();
-            _pacePoints = MapPacePoints(raw);
+            _pacePoints = MapPacePoints(raw, _paceStints);
             _paceTeams = raw
                 .Where(l => !string.IsNullOrWhiteSpace(l.TeamName))
                 .GroupBy(l => l.DriverNumber)
@@ -440,20 +447,52 @@ else
         }
     }
 
-    private static List<LapTimePointDto> MapPacePoints(IEnumerable<LapDto> laps) =>
-        laps
-            .Where(l => l.LapDuration is > 0)
-            .Select(l => new LapTimePointDto
+    private static List<LapTimePointDto> MapPacePoints(IEnumerable<LapDto> laps, IReadOnlyList<StintDto> stints)
+    {
+        var byDriver = stints
+            .GroupBy(s => s.DriverNumber)
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => s.StintNumber).ToList());
+
+        return laps
+            .Select(l =>
             {
-                LapNumber = l.LapNumber,
-                LapTimeSeconds = l.LapDuration!.Value,
-                DriverCode = l.NameAcronym,
-                DriverNumber = l.DriverNumber,
-                Compound = null,
-                TyreAge = null,
-                IsPitLap = l.IsPitOutLap == true
+                StintDto? stint = null;
+                if (byDriver.TryGetValue(l.DriverNumber, out var list))
+                {
+                    stint = list.FirstOrDefault(s =>
+                        l.LapNumber >= (s.LapStart ?? int.MinValue)
+                        && l.LapNumber <= (s.LapEnd ?? int.MaxValue));
+                }
+
+                int? tyreAge = null;
+                if (stint?.LapStart is int start)
+                {
+                    tyreAge = (stint.TyreAgeAtStart ?? 0) + (l.LapNumber - start);
+                }
+
+                return new LapTimePointDto
+                {
+                    LapNumber = l.LapNumber,
+                    LapTimeSeconds = l.LapDuration is > 0 ? l.LapDuration.Value : 0,
+                    Sector1Seconds = l.DurationSector1 is > 0 ? l.DurationSector1.Value : 0,
+                    Sector2Seconds = l.DurationSector2 is > 0 ? l.DurationSector2.Value : 0,
+                    Sector3Seconds = l.DurationSector3 is > 0 ? l.DurationSector3.Value : 0,
+                    TopSpeedKmh = l.StSpeed is > 0 ? l.StSpeed.Value : 0,
+                    DriverCode = l.NameAcronym,
+                    DriverNumber = l.DriverNumber,
+                    Compound = stint?.Compound,
+                    TyreAge = tyreAge,
+                    StintNumber = stint?.StintNumber,
+                    IsPitLap = l.IsPitOutLap == true
+                };
             })
+            .Where(p => p.LapTimeSeconds > 0
+                        || p.Sector1Seconds > 0
+                        || p.Sector2Seconds > 0
+                        || p.Sector3Seconds > 0
+                        || p.TopSpeedKmh > 0)
             .OrderBy(p => p.DriverNumber)
             .ThenBy(p => p.LapNumber)
             .ToList();
+    }
 }

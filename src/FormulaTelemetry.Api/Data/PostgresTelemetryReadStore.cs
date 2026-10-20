@@ -220,6 +220,38 @@ public sealed class PostgresTelemetryReadStore : ITelemetryReadStore
         return list;
     }
 
+    public async Task<IReadOnlyList<StintDto>> GetStintsAsync(int sessionKey, CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT session_key, driver_number, stint_number, meeting_key,
+                   lap_start, lap_end, compound, tyre_age_at_start
+            FROM stints
+            WHERE session_key = @session_key
+            ORDER BY driver_number, stint_number
+            """;
+
+        await using var conn = await OpenAsync(cancellationToken);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("session_key", sessionKey);
+
+        var list = new List<StintDto>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            list.Add(new StintDto(
+                reader.GetInt32(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetInt32(7)));
+        }
+
+        return list;
+    }
+
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var conn = new NpgsqlConnection(_connectionString);
